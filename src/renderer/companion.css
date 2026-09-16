@@ -1,0 +1,34 @@
+.creature-stage { text-align: center; padding: 8px 16px 20px; border-radius: 24px; background: radial-gradient(ellipse at 50% 40%, #f1e6f3, transparent 70%); }
+.creature-large { width: 230px; max-width: 100%; margin: auto; }
+.saved-companion { display: block; width: 56px; flex: 0 0 56px; }
+.companion { display: block; width: 100%; height: auto; overflow: visible; }
+.creature-stage p { margin: 0 0 4px; font-weight: 600; }
+.creature-states { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 12px 0; }
+.creature-states button { font-size: 12px; }
+.creature-states button[aria-pressed='true'] { background: #765783; color: white; }
+.creature-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.creature-controls select { width: 100%; min-width: 0; }
+.creature-small-preview { display: flex; align-items: center; gap: 12px; border-top: 1px solid #d9d0dd; margin-top: 12px; padding-top: 12px; }
+.creature-small-preview > div { width: 48px; }
+.creature-body { transform-origin: 120px 190px; animation: creature-breathe 5s ease-in-out infinite; }
+.creature-eyes { transform-box: fill-box; transform-origin: center; animation: creature-blink 7s linear infinite; }
+.companion[data-mood='thinking'] .creature-body { animation: creature-ponder 4s ease-in-out infinite; }
+.creature-thought { animation: creature-drift 3s ease-in-out infinite; }
+.companion[data-mood='working'] .creature-body { animation: creature-focus 1.8s ease-in-out infinite; }
+.companion[data-mood='working'] .creature-arm { transform-origin: 48px 137px; animation: creature-tap .9s ease-in-out infinite alternate; }
+.companion[data-mood='attention'] .creature-wave { transform-origin: 184px 151px; animation: creature-wave 1s ease-in-out 3; }
+.companion[data-mood='done'] .creature-body { animation: creature-hop .7s ease-in-out 1; }
+.companion[data-motion='expressive'] { --lift: -9px; --tilt: 7deg; }
+.companion[data-motion='subtle'] { --lift: -3px; --tilt: 3deg; }
+.companion[data-motion='still'] *, .companion[data-paused='true'] * { animation: none !important; }
+@keyframes creature-breathe { 0%,100% { transform: scale(1,1); } 50% { transform: translateY(var(--lift, -3px)) scale(1.015,1.02); } }
+@keyframes creature-blink { 0%,43%,47%,100% { transform: scaleY(1); } 45% { transform: scaleY(.08); } }
+@keyframes creature-ponder { 0%,100% { transform: rotate(0); } 50% { transform: rotate(var(--tilt, 3deg)) translateY(var(--lift, -3px)); } }
+@keyframes creature-drift { 0%,100% { opacity: .45; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+@keyframes creature-focus { 0%,100% { transform: rotate(-1deg); } 50% { transform: rotate(var(--tilt, 3deg)); } }
+@keyframes creature-tap { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
+@keyframes creature-wave { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-28deg); } }
+@keyframes creature-hop { 0%,100% { transform: translateY(0); } 40% { transform: translateY(var(--lift, -3px)) scale(.98,1.03); } 75% { transform: scale(1.03,.97); } }
+@media (prefers-reduced-motion: reduce) { .companion * { animation: none !important; } }
+@media (prefers-color-scheme: dark) { .creature-stage { background: radial-gradient(ellipse at 50% 40%, #49384e, transparent 70%); } }
+@media (max-width: 460px) { .creature-controls { grid-template-columns: 1fr; } }

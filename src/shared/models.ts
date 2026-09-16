@@ -1,0 +1,36 @@
+import type { Provider } from './protocol';
+
+// Initial curated catalog from Jean2's provider configuration. Availability is
+// decided by the provider, not inferred from a successful OAuth login.
+export const MODELS: { id: string; name: string; provider: Provider }[] = [
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', provider: 'deepseek' },
+  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', provider: 'deepseek' },
+  { id: 'gpt-5.4', name: 'GPT-5.4', provider: 'codex' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', provider: 'codex' },
+  { id: 'gpt-5.5', name: 'GPT-5.5', provider: 'codex' },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'codex' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', provider: 'codex' },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', provider: 'codex' },
+  { id: 'gpt-6-astra', name: 'GPT-6 Astra', provider: 'codex' },
+];
+export function requireModel(provider: unknown, model: unknown) {
+  const found = MODELS.find((item) => item.provider === provider && item.id === model);
+  if (!found) throw new Error('Select a supported model for this provider.');
+  return found;
+}
+export function defaultModel(provider: Provider): string { return MODELS.find((item) => item.provider === provider)!.id; }
+
+export type Thinking = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export function thinkingLevels(provider: Provider, model: string): Thinking[] {
+  requireModel(provider, model);
+  if (provider === 'deepseek') return ['high', 'max'];
+  return ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5'].includes(model)
+    ? ['low', 'medium', 'high', 'xhigh']
+    : ['low', 'medium', 'high', 'xhigh', 'max'];
+}
+export function requireThinking(provider: Provider, model: string, value: unknown): Thinking | null {
+  const supported = thinkingLevels(provider, model);
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || !supported.includes(value as Thinking)) throw new Error('Select a supported thinking level for this model.');
+  return value as Thinking;
+}
