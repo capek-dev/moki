@@ -8,10 +8,10 @@ import { join } from 'node:path';
 
 test('thinking levels are model-specific; malformed and unsupported levels rejected', () => {
   expect(thinkingLevels('deepseek', 'deepseek-flash')).toEqual(['high', 'max']);
-  expect(thinkingLevels('codex', 'gpt-5.4')).not.toContain('max');
+  for (const model of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5']) expect(() => thinkingLevels('codex', model)).toThrow('supported model');
   expect(thinkingLevels('codex', 'gpt-6-astra')).toContain('max');
-  expect(requireThinking('codex', 'gpt-5.4', undefined)).toBeNull();
-  for (const value of ['max', 'off', '', {}, 1]) expect(() => requireThinking('codex', 'gpt-5.4', value)).toThrow();
+  expect(requireThinking('codex', 'gpt-5.6-sol', undefined)).toBeNull();
+  for (const value of ['off', '', {}, 1]) expect(() => requireThinking('codex', 'gpt-5.6-sol', value)).toThrow();
 });
 test('thinking persists per conversation, defaults on model change and survives restart', () => {
   const dir = mkdtempSync(join(tmpdir(), 'moki-thinking-'));

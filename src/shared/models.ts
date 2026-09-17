@@ -5,9 +5,6 @@ import type { Provider } from './protocol';
 export const MODELS: { id: string; name: string; provider: Provider }[] = [
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', provider: 'deepseek' },
   { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', provider: 'deepseek' },
-  { id: 'gpt-5.4', name: 'GPT-5.4', provider: 'codex' },
-  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', provider: 'codex' },
-  { id: 'gpt-5.5', name: 'GPT-5.5', provider: 'codex' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'codex' },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', provider: 'codex' },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', provider: 'codex' },
@@ -24,9 +21,7 @@ export type Thinking = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export function thinkingLevels(provider: Provider, model: string): Thinking[] {
   requireModel(provider, model);
   if (provider === 'deepseek') return ['high', 'max'];
-  return ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5'].includes(model)
-    ? ['low', 'medium', 'high', 'xhigh']
-    : ['low', 'medium', 'high', 'xhigh', 'max'];
+  return ['low', 'medium', 'high', 'xhigh', 'max'];
 }
 export function requireThinking(provider: Provider, model: string, value: unknown): Thinking | null {
   const supported = thinkingLevels(provider, model);

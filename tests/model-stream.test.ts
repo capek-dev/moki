@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createGenerate, codexFetch } from '../src/backend/model-stream';
 import type { Turn } from '../src/backend/chat';
 
-const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.4', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };
+const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.6-sol', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };
 test('published DeepSeek adapter serializes history and streams in an isolated process', async () => {
   const child = Bun.spawn([process.execPath, 'run', 'tests/fixtures/deepseek-stream.ts'], { stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => child.kill(), 10000);
@@ -15,7 +15,7 @@ test('published DeepSeek adapter serializes history and streams in an isolated p
 
 const sse = (events: unknown[]) => events.map((data) => `data: ${JSON.stringify(data)}\n\n`).join('');
 for (const thinking of [null, 'low', 'medium', 'high', 'xhigh', 'max'] as const) test(`Codex payload and stream with thinking ${thinking ?? 'default'}`, async () => {
-  const model = thinking === 'max' ? 'gpt-6-astra' : 'gpt-5.4';
+  const model = thinking === 'max' ? 'gpt-6-astra' : 'gpt-5.6-sol';
   let calls = 0;
   const generate = createGenerate((async (url: string, init: RequestInit) => {
     calls++;
@@ -31,7 +31,7 @@ for (const thinking of [null, 'low', 'medium', 'high', 'xhigh', 'max'] as const)
     expect(body.input.map((item: { role: string }) => item.role)).toEqual(['user', 'assistant', 'user']);
     for (const key of ['temperature', 'max_output_tokens', 'tools']) expect(body[key]).toBeUndefined();
     return new Response(sse([
-      { type: 'response.created', response: { id: 'resp_1', created_at: 1, model: 'gpt-5.4' } },
+      { type: 'response.created', response: { id: 'resp_1', created_at: 1, model } },
       { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg_1', role: 'assistant', content: [] } },
       { type: 'response.content_part.added', item_id: 'msg_1', output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } },
       { type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, content_index: 0, delta: 'Hello again' },
