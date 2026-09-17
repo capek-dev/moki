@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { createRoot } from 'react-dom/client';
 import type { Request, Result } from '../shared/protocol';
 import { MODELS, defaultModel, thinkingLevels, type Thinking } from '../shared/models';
 import { applyResult, type ChatState } from './chat-state';
-import { Settings } from './settings';
-import { History } from './history';
 import { Companion, INITIAL_APPEARANCE } from './companion';
 import { ChatCompanion } from './chat-companion';
 import { useTone, rememberPalette } from './tone';
@@ -17,7 +14,7 @@ import { ArrowUp, Clock, Gear, Plus, Stop, Zap } from './ui/icons';
 const PROVIDER_LABELS = { deepseek: 'DeepSeek', codex: 'Codex subscription' } as const;
 const AUTO_THINKING = 'auto';
 
-function App() {
+export function App() {
   const [state, setState] = useState<ChatState>({ revision: 0, histories: {} });
   const data = state.data;
   const [assistantId, setAssistantId] = useState('moki');
@@ -218,4 +215,3 @@ function App() {
     </form>
   </main>;
 }
-createRoot(document.getElementById('root')!).render(location.hash === '#settings' ? <Settings /> : location.hash === '#history' ? <History /> : <App />);

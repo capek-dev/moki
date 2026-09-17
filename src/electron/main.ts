@@ -8,9 +8,12 @@ import { requireThinking } from '../shared/models';
 import type { ChatRequest, Request, Result } from '../shared/protocol';
 import { userDataPath } from '../shared/data-paths';
 
-app.setName('Moki');
+import { DEV_ORIGIN, isDevelopment } from '../shared/development';
+
+const development = isDevelopment(app.isPackaged, process.env.MOKI_DEV);
+app.setName(development ? 'Moki Dev' : 'Moki');
 try {
-  const dataDir = userDataPath(app.getPath('appData'));
+  const dataDir = development ? join(app.getPath('appData'), 'Moki Dev') : userDataPath(app.getPath('appData'));
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   app.setPath('userData', dataDir);
 }
@@ -41,7 +44,15 @@ const appRoot = app.getAppPath();
 const page = join(appRoot, 'dist/renderer/index.html');
 function show() { window?.show(); window?.focus(); }
 function secureWindow(target: BrowserWindow, hash = '') {
-  registered.set(target, pathToFileURL(page).href + hash);
+  registered.set(target, (development ? DEV_ORIGIN + '/' : pathToFileURL(page).href) + hash);
+  if (development) {
+    target.webContents.on('context-menu', (_event, params) => {
+      Menu.buildFromTemplate([{ label: 'Inspect Element', click: () => {
+        target.webContents.openDevTools({ mode: 'detach' });
+        target.webContents.inspectElement(params.x, params.y);
+      } }]).popup({ window: target });
+    });
+  }
   target.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   target.webContents.on('will-navigate', (event) => event.preventDefault());
   target.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -63,7 +74,8 @@ async function openSettings() {
   secureWindow(settings, '#settings');
   settings.on('close', (event) => { if (!quitting) { event.preventDefault(); settings?.hide(); } });
   settings.on('closed', () => { settings = undefined; });
-  await settings.loadFile(page, { hash: 'settings' });
+  if (development) await settings.loadURL(DEV_ORIGIN + '/#settings');
+  else await settings.loadFile(page, { hash: 'settings' });
 }
 async function openHistory() {
   if (quitting) return;
@@ -77,7 +89,8 @@ async function openHistory() {
   secureWindow(history, '#history');
   // History is transient: closing it closes it, no hide-and-keep.
   history.on('closed', () => { history = undefined; });
-  await history.loadFile(page, { hash: 'history' });
+  if (development) await history.loadURL(DEV_ORIGIN + '/#history');
+  else await history.loadFile(page, { hash: 'history' });
 }
 function showSettings() {
   void openSettings().catch((error) => dialog.showErrorBox('Could not open settings', String(error)));
@@ -99,7 +112,7 @@ else {
     await runtime.ready;
     window = new BrowserWindow({
       width: 440, height: 680, minWidth: 360, minHeight: 480,
-      title: 'Moki',
+      title: development ? 'Moki Dev' : 'Moki',
       webPreferences: { preload: join(appRoot, 'dist/electron/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
       ...glassWindow,
     });
@@ -158,9 +171,22 @@ else {
       { label: 'Moki', submenu: [{ label: 'Show Moki', click: show }, { label: 'History…', accelerator: 'CmdOrCtrl+Y', click: showHistory }, { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings }, { role: 'quit' }] },
       { role: 'editMenu' },
       { role: 'windowMenu' },
+      ...(development ? [{ label: 'Developer', submenu: [
+        { role: 'toggleDevTools' as const, accelerator: 'Alt+CommandOrControl+I' },
+        { role: 'reload' as const },
+      ] }] : []),
     ]));
-    await window.loadFile(page);
+    if (development) {
+      await window.loadURL(DEV_ORIGIN + '/');
+      window.webContents.openDevTools({ mode: 'detach' });
+    } else await window.loadFile(page);
   }).catch((error) => { dialog.showErrorBox('Moki could not start', error instanceof Error ? error.message : 'Unknown startup error.'); app.quit(); });
+  if (development) {
+    process.on('message', (message) => { if (message === 'moki:dev-quit') app.quit(); });
+    process.on('disconnect', () => app.quit());
+    process.on('SIGTERM', () => app.quit());
+    process.on('SIGINT', () => app.quit());
+  }
   app.on('activate', show);
   app.on('window-all-closed', () => { /* Tray owns application lifetime. */ });
   app.on('before-quit', (event) => {

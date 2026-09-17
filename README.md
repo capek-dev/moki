@@ -28,6 +28,16 @@ bun run desktop
 
 `desktop` opens the native application, not a development server. Closing its window hides it; use the tray or Dock to reopen. Use Quit to stop the app and background process.
 
+## Development
+
+Run `bun run dev` to build the isolated Electron shell/backend, start Vite on `127.0.0.1:5173`, and open **Moki Dev** with detached DevTools. Right-click **Inspect Element**, or press **Cmd+Option+I**, in chat, Settings, or History.
+
+React component and CSS changes hot reload. Source maps expose TSX in DevTools. Changes to Electron, preload, backend, or build configuration require stopping and rerunning `bun run dev`. Some shared-module edits cause a full page reload, which resets unsent drafts.
+
+Development uses a separate `Moki Dev` profile with its own chats and provider connections. Connect providers separately in its Settings. Normal `bun run desktop` and packaged builds remain server-free and use their existing data. The server uses a fixed port and refuses to start if it is occupied. Ctrl+C or quitting the dev app stops the server too.
+
+`bun run build:dev` builds only the dev shell/backend without starting anything. Production renderer CSP stays unchanged; only the development HTML permits Vite's inline refresh preamble and loopback WebSocket connection.
+
 ## Focused verification
 
 ```sh

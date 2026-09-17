@@ -25,13 +25,16 @@ test('preload strips Electron events and removes subscriptions', () => {
 
 // Execute the actual bundle with a private Electron/process harness. No global
 // module mocks, native windows, backend processes, or servers are started.
-test('settings is singleton, registered IPC broadcasts updates, and closing preserves windows', async () => {
+test.each([{ development: false, packaged: false }, { development: true, packaged: false }, { development: false, packaged: true }])('window IPC and inspection controls: %j', async ({ development, packaged }) => {
+  const appName = development ? 'Moki Dev' : 'Moki';
   const windows: FakeWindow[] = [];
   const handlers = new Map<string, (...args: any[]) => any>();
   let menu: any[] = [];
   class FakeWindow extends EventEmitter {
     webContents = Object.assign(new EventEmitter(), {
-      mainFrame: { url: '' }, sent: [] as any[],
+      mainFrame: { url: '' }, sent: [] as any[], inspected: [] as number[], devTools: 0,
+      openDevTools() { this.devTools++; },
+      inspectElement(x: number, y: number) { this.inspected = [x, y]; },
       setWindowOpenHandler() {},
       session: { setPermissionRequestHandler() {} },
       send(channel: string, result: unknown) { this.sent.push({ channel, result }); },
@@ -42,6 +45,7 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
     constructor(public options: any) { super(); windows.push(this); }
     static fromWebContents(contents: unknown) { return windows.find((w) => w.webContents === contents); }
     async loadFile(file: string, options?: { hash: string }) { this.webContents.mainFrame.url = url.pathToFileURL(file).href + (options ? '#' + options.hash : ''); }
+    async loadURL(value: string) { this.webContents.mainFrame.url = value; }
     show() { this.shown++; }
     focus() { this.focused++; }
     hide() { this.hidden++; }
@@ -60,27 +64,27 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
   });
   const app = Object.assign(new EventEmitter(), {
     getAppPath: () => process.cwd(), requestSingleInstanceLock: () => true,
-    whenReady: () => Promise.resolve(), getPath: () => '/unused', quit() {}, isPackaged: false,
-    setName(name: string) { expect(name).toBe('Moki'); },
-    setPath(key: string, value: string) { expect(key).toBe('userData'); expect(value).toBe('/unused/Moki'); },
+    whenReady: () => Promise.resolve(), getPath: () => '/unused', quit() {}, isPackaged: packaged,
+    setName(name: string) { expect(name).toBe(appName); },
+    setPath(key: string, value: string) { expect(key).toBe('userData'); expect(value).toBe('/unused/' + appName); },
   });
   class Tray extends EventEmitter { setTitle() {} setToolTip() {} setContextMenu() {} }
   const modules: Record<string, unknown> = {
     electron: { app, BrowserWindow: FakeWindow, Tray, nativeImage: { createEmpty() {} },
       ipcMain: { handle: (name: string, handler: any) => handlers.set(name, handler) },
-      Menu: { buildFromTemplate: (value: any[]) => value, setApplicationMenu: (value: any[]) => { menu = value; } },
+      Menu: { buildFromTemplate: (value: any[]) => Object.assign(value, { popup() { value[0].click(); } }), setApplicationMenu: (value: any[]) => { menu = value; } },
       dialog: { showErrorBox: (_title: string, message: string) => { throw new Error(message); } },
     },
     'node:path': path, 'node:url': url, 'node:readline': readline,
     'node:crypto': nodeCrypto, 'node:fs': {
       statSync() { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
-      mkdirSync(dir: string, options: unknown) { expect(dir).toBe('/unused/Moki'); expect(options).toEqual({ recursive: true, mode: 0o700 }); },
+      mkdirSync(dir: string, options: unknown) { expect(dir).toBe('/unused/' + appName); expect(options).toEqual({ recursive: true, mode: 0o700 }); },
     }, 'node:http': {},
     'node:child_process': { spawn: () => child },
   };
   runInNewContext(readFileSync('dist/electron/main.cjs', 'utf8'), {
     require: (name: string) => { if (!(name in modules)) throw new Error(name); return modules[name]; },
-    process: { env: {}, resourcesPath: '/unused' }, crypto, Buffer, setTimeout, clearTimeout,
+    process: Object.assign(new EventEmitter(), { env: { MOKI_DEV: development || packaged ? '1' : undefined }, resourcesPath: '/unused' }), crypto, Buffer, setTimeout, clearTimeout,
     fetch: () => { throw new Error('Unexpected network'); },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -91,7 +95,9 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
   const request = handlers.get('moki:request')!;
   try {
     expect(windows).toHaveLength(1);
-    expect(windows[0].options.title).toBe('Moki');
+    expect(windows[0].options.title).toBe(appName);
+    expect(menu.some((item) => item.label === 'Developer')).toBe(development);
+    expect(windows[0].webContents.devTools).toBe(development ? 1 : 0);
     expect(() => handlers.get('moki:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
     await open(event(windows[0]));
     expect(windows).toHaveLength(2);
@@ -100,6 +106,18 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
     expect(windows[1].focused).toBe(1);
     expect(windows[1].webContents.mainFrame.url).toEndWith('#settings');
     expect(windows[1].options.webPreferences.sandbox).toBe(true);
+    await handlers.get('moki:history')!(event(windows[0]));
+    expect(windows).toHaveLength(3);
+    for (const w of windows) {
+      expect(w.options.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false });
+      expect(w.webContents.mainFrame.url.startsWith('http://127.0.0.1:5173/')).toBe(development);
+      w.webContents.emit('context-menu', {}, { x: 12, y: 34 });
+      expect(w.webContents.inspected).toEqual(development ? [12, 34] : []);
+      const trusted = w.webContents.mainFrame.url;
+      w.webContents.mainFrame.url = 'http://127.0.0.1:5173/untrusted';
+      await expect(request(event(w), { method: 'snapshot' })).rejects.toThrow('Untrusted request');
+      w.webContents.mainFrame.url = trusted;
+    }
     const result = await request(event(windows[1]), { method: 'snapshot' });
     expect(result.revision).toBe(1);
     await expect(request(event(windows[0]), { method: 'startChat', credentials: { key: 'injected' } })).rejects.toThrow('Unsupported request');
