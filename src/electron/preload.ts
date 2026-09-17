@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DesktopAPI } from '../shared/protocol';
+import type { DesktopAPI } from '@shared/protocol';
 const api: DesktopAPI = {
   chat: (request) => ipcRenderer.invoke('moki:chat', request),
   onRuntimeError: (listener) => {

@@ -5,6 +5,15 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   root: resolve(import.meta.dirname, '../src/renderer'),
+  resolve: {
+    alias: {
+      '@shared': resolve(import.meta.dirname, '../src/shared'),
+      '@renderer': resolve(import.meta.dirname, '../src/renderer'),
+      '@electron': resolve(import.meta.dirname, '../src/electron'),
+      '@backend': resolve(import.meta.dirname, '../src/backend'),
+      '@scripts': resolve(import.meta.dirname, '..'),
+    },
+  },
   plugins: [react(), tailwind(), {
     name: 'moki-development-html',
     transformIndexHtml: {
@@ -13,7 +22,7 @@ export default defineConfig({
         .replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
         .replace("connect-src 'none'", "connect-src 'self' ws://127.0.0.1:5173")
         .replace('<title>Moki</title>', '<title>Moki Dev</title>')
-        .replace('./app.css', './tailwind.css')
+        .replace('./app.css', './styles/tailwind.css')
         .replace('./app.js', './entry.tsx'),
     },
   }],

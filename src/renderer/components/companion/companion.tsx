@@ -7,8 +7,8 @@ export const PALETTES = {
   sky: { light: '#eaf6ff', body: '#a6c9e7', shade: '#759cce', accent: '#516fa5' },
 };
 export type Mood = 'idle' | 'thinking' | 'working' | 'attention' | 'done';
-import type { Appearance } from '../shared/appearance';
-export { INITIAL_APPEARANCE, type Appearance } from '../shared/appearance';
+import type { Appearance } from '@shared/appearance';
+export { INITIAL_APPEARANCE, type Appearance } from '@shared/appearance';
 const BODIES = {
   pebble: 'M49 130 C43 79 70 47 120 47 C170 47 197 79 191 130 C187 172 161 190 120 190 C79 190 53 172 49 130Z',
   mochi: 'M39 139 C40 105 65 67 120 67 C175 67 200 105 201 139 C204 176 166 190 120 190 C74 190 36 176 39 139Z',

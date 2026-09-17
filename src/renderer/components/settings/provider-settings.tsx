@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ProviderCommand, ProviderState } from '../shared/protocol';
-import { Button } from './ui/button';
-import { Panel } from './ui/panel';
-import { Field, Input } from './ui/field';
+import type { ProviderCommand, ProviderState } from '@shared/protocol';
+import { Button } from '@renderer/components/ui/button';
+import { Panel } from '@renderer/components/ui/panel';
+import { Field, Input } from '@renderer/components/ui/field';
 
 function StatusChip({ on, label }: { on: boolean; label: string }) {
   return <span className="inline-flex items-center gap-1.5 text-[12px] text-ink-2">

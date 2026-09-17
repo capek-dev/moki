@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { TonePicker } from '../src/renderer/tone-picker';
-import { TONES, TONE_KEY, PALETTE_KEY, activePalette, applyTone, readToneChoice, resolveTone, type FixedTone } from '../src/renderer/tone';
-import type { Appearance } from '../src/shared/appearance';
+import { TonePicker } from '@renderer/components/settings/tone-picker';
+import { TONES, TONE_KEY, PALETTE_KEY, activePalette, applyTone, readToneChoice, resolveTone, type FixedTone } from '@renderer/lib/tone';
+import type { Appearance } from '@shared/appearance';
 
 test('tone catalog has distinct names and light/dark variants for every tone', () => {
   const ids = Object.keys(TONES) as FixedTone[];

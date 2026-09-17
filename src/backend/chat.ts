@@ -1,8 +1,8 @@
 import type { ModelMessage } from 'ai';
-import { Store, text } from './store';
-import { requireThinking, type Thinking } from '../shared/models';
-import type { Attachment, Provider, Result, Message } from '../shared/protocol';
-import { requireAttachmentId } from '../shared/attachments';
+import { Store, text } from '@backend/store';
+import { requireThinking, type Thinking } from '@shared/models';
+import type { Attachment, Provider, Result, Message } from '@shared/protocol';
+import { requireAttachmentId } from '@shared/attachments';
 
 // Private pipe contract, never exposed through the renderer's request union.
 export type Credentials = { provider: 'deepseek'; key: string } | { provider: 'codex'; access: string; accountId: string };

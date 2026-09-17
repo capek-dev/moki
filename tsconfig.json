@@ -9,7 +9,15 @@
     "noEmit": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["bun", "node"]
+    "types": ["bun", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"],
+      "@renderer/*": ["src/renderer/*"],
+      "@electron/*": ["src/electron/*"],
+      "@backend/*": ["src/backend/*"],
+      "@scripts/*": ["scripts/*"]
+    }
   },
   "include": ["src", "scripts", "tests"]
 }

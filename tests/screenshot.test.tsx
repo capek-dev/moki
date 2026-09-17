@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AttachmentImage } from '../src/renderer/attachment-image';
-import { attachmentUrl, MAX_IMAGE_BYTES, requireAttachmentId, validatePng } from '../src/shared/attachments';
-import { supportsImageInput } from '../src/shared/models';
+import { AttachmentImage } from '@renderer/components/chat/attachment-image';
+import { attachmentUrl, MAX_IMAGE_BYTES, requireAttachmentId, validatePng } from '@shared/attachments';
+import { supportsImageInput } from '@shared/models';
 
 const id = '123e4567-e89b-42d3-a456-426614174000';
 function png(width = 640, height = 360) {
@@ -38,12 +38,12 @@ test('screenshot preview uses only the validated app protocol and has accessible
 
 test('native capture and preview boundaries do not accept renderer paths or shell commands', async () => {
   const [capture, main, preload, app, html, pkg] = await Promise.all([
-    Bun.file(new URL('../src/electron/screenshot-capture.ts', import.meta.url)).text(),
-    Bun.file(new URL('../src/electron/main.ts', import.meta.url)).text(),
-    Bun.file(new URL('../src/electron/preload.ts', import.meta.url)).text(),
-    Bun.file(new URL('../src/renderer/app.tsx', import.meta.url)).text(),
-    Bun.file(new URL('../src/renderer/index.html', import.meta.url)).text(),
-    Bun.file(new URL('../package.json', import.meta.url)).json(),
+    Bun.file('src/electron/screenshot-capture.ts').text(),
+    Bun.file('src/electron/main.ts').text(),
+    Bun.file('src/electron/preload.ts').text(),
+    Bun.file('src/renderer/windows/chat-window.tsx').text(),
+    Bun.file('src/renderer/index.html').text(),
+    Bun.file('package.json').json(),
   ]);
   expect(capture).toContain("spawn('/usr/sbin/screencapture', ['-i', '-s', '-x', '-t', 'png', path], { shell: false");
   expect(capture).not.toContain("systemPreferences.getMediaAccessStatus('screen')");

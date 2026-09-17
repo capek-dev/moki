@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { prepareDevApp } from './dev-app';
+import { prepareDevApp } from '@scripts/dev-app';
 
 process.chdir(resolve(import.meta.dirname, '..'));
 let child: ChildProcess | undefined;

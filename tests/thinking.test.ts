@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { Store } from '../src/backend/store';
-import { Chat, type Turn } from '../src/backend/chat';
-import { requireThinking, thinkingLevels } from '../src/shared/models';
+import { Store } from '@backend/store';
+import { Chat, type Turn } from '@backend/chat';
+import { requireThinking, thinkingLevels } from '@shared/models';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolveConfig, type Plugin } from 'vite';
-import config from '../scripts/vite.config';
-import { DEV_ORIGIN, isDevelopment } from '../src/shared/development';
+import config from '@scripts/vite.config';
+import { DEV_ORIGIN, isDevelopment } from '@shared/development';
 
 test('development requires an explicit flag and cannot activate in a packaged app', () => {
   expect(isDevelopment(false, '1')).toBe(true);
@@ -26,7 +26,7 @@ test('only Vite HTML gains source entry points and refresh CSP allowances', () =
   const transform = plugin.transformIndexHtml as { handler: (html: string) => string };
   const dev = transform.handler(html);
   expect(dev).toContain('./entry.tsx');
-  expect(dev).toContain('./tailwind.css');
+  expect(dev).toContain('./styles/tailwind.css');
   expect(dev).toContain("connect-src 'self' ws://127.0.0.1:5173");
   expect(dev).toContain("script-src 'self' 'unsafe-inline'");
   const production = readFileSync('dist/renderer/index.html', 'utf8');

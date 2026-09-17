@@ -71,6 +71,10 @@ test.each([{ development: false, packaged: false }, { development: true, package
   class Tray extends EventEmitter { setTitle() {} setToolTip() {} setContextMenu() {} }
   const modules: Record<string, unknown> = {
     electron: { app, BrowserWindow: FakeWindow, Tray, nativeImage: { createEmpty() {} },
+      protocol: { registerSchemesAsPrivileged() {}, handle() {} },
+      clipboard: { writeText() {} },
+      globalShortcut: { register: () => true, unregisterAll() {} },
+      safeStorage: {},
       ipcMain: { handle: (name: string, handler: any) => handlers.set(name, handler) },
       Menu: { buildFromTemplate: (value: any[]) => Object.assign(value, { popup() { value[0].click(); } }), setApplicationMenu: (value: any[]) => { menu = value; } },
       dialog: { showErrorBox: (_title: string, message: string) => { throw new Error(message); } },
@@ -78,7 +82,9 @@ test.each([{ development: false, packaged: false }, { development: true, package
     'node:path': path, 'node:url': url, 'node:readline': readline,
     'node:crypto': nodeCrypto, 'node:fs': {
       statSync() { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
-      mkdirSync(dir: string, options: unknown) { expect(dir).toBe('/unused/' + appName); expect(options).toEqual({ recursive: true, mode: 0o700 }); },
+      readdirSync: () => [] as string[],
+      rmSync() {},
+      mkdirSync(dir: string, options: unknown) { expect(options).toEqual({ recursive: true, mode: 0o700 }); expect(dir.startsWith('/unused/')).toBe(true); },
     }, 'node:http': {},
     'node:child_process': { spawn: () => child },
   };

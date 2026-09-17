@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { Appearance, Mood } from './companion';
-import { Companion, PALETTES } from './companion';
-import { Button } from './ui/button';
-import { Field } from './ui/field';
-import { SimpleSelect } from './ui/select';
+import type { Appearance, Mood } from '@renderer/components/companion/companion';
+import { Companion, PALETTES } from '@renderer/components/companion/companion';
+import { Button } from '@renderer/components/ui/button';
+import { Field } from '@renderer/components/ui/field';
+import { SimpleSelect } from '@renderer/components/ui/select';
 
 const STATES: { id: Mood; label: string; caption: string }[] = [
   { id: 'idle', label: 'Idle', caption: 'Here when you need me.' },

@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
-import { cn } from './cn';
+import { cn } from '@renderer/components/ui/cn';
 
 export function Panel({ className, ...props }: ComponentProps<'section'>) {
   return <section className={cn('glass rounded-2xl p-4 shadow-[var(--shadow-glass)]', className)} {...props} />;

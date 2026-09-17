@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EncryptedVault, ProviderConnections, type Vault } from '../src/electron/provider-connections';
+import { EncryptedVault, ProviderConnections, type Vault } from '@electron/provider-connections';
 
 function fixture(fetcher: (url: string, options: RequestInit) => Promise<Response> = async () => Response.json({ data: [] })) {
   let saved: ReturnType<Vault['read']> = { version: 1 };

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Message } from '../shared/protocol';
-import { Companion, type Appearance, type Mood } from './companion';
+import type { Message } from '@shared/protocol';
+import { Companion, type Appearance, type Mood } from '@renderer/components/companion/companion';
 
 interface Activity {
   /** Already scoped to the selected conversation, in transcript order. */

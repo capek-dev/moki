@@ -3,9 +3,9 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Window } from 'happy-dom';
-import { Answer } from '../src/renderer/answer';
-import { CopyButton } from '../src/renderer/copy-button';
-import { requireCopyText, requireWebLink, webLink } from '../src/shared/answer-actions';
+import { Answer } from '@renderer/components/chat/answer';
+import { CopyButton } from '@renderer/components/chat/copy-button';
+import { requireCopyText, requireWebLink, webLink } from '@shared/answer-actions';
 
 const render = (text: string) => renderToStaticMarkup(<Answer text={text} />);
 
@@ -121,7 +121,7 @@ test('web links open only on click through the bridge and expose failures', asyn
 });
 
 test('IPC handlers retain sender checks and validate before privileged operations', async () => {
-  const main = await Bun.file(new URL('../src/electron/main.ts', import.meta.url)).text();
+  const main = await Bun.file('src/electron/main.ts').text();
   expect(main).toContain("ipcMain.handle('moki:copy-text', (event, text: unknown) => {\n      assertTrusted(event);\n      clipboard.writeText(requireCopyText(text));");
   expect(main).toContain("ipcMain.handle('moki:open-web-link', (event, url: unknown) => {\n      assertTrusted(event);\n      return shell.openExternal(requireWebLink(url));");
   expect(main).toContain("setWindowOpenHandler(() => ({ action: 'deny' }))");

@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
-import { cn } from './cn';
+import { cn } from '@renderer/components/ui/cn';
 
 export function Field({ label, htmlFor, hint, children, className }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; children: ReactNode; className?: string }) {
   return <div className={cn('grid gap-1.5', className)}>

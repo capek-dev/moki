@@ -1,4 +1,4 @@
-import type { Provider } from './protocol';
+import type { Provider } from '@shared/protocol';
 
 // Initial curated catalog from Jean2's provider configuration. Availability is
 // decided by the provider, not inferred from a successful OAuth login.

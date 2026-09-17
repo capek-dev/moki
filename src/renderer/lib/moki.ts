@@ -1,4 +1,4 @@
-import type { Assistant, Conversation } from '../shared/protocol';
+import type { Assistant, Conversation } from '@shared/protocol';
 
 /** A presentation policy, not a migration. Legacy profiles keep their original record. */
 export function mokiAssistant(assistants: readonly Assistant[] = []): Assistant | undefined {

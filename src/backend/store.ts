@@ -1,10 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { storedAppearance, validateAppearance } from '../shared/appearance';
-import { attachmentDirectories, requireAttachmentId, validatePng } from '../shared/attachments';
-import type { Assistant, Attachment, Conversation, Message, Result, Snapshot } from '../shared/protocol';
-import { defaultModel, requireModel, requireThinking, supportsImageInput, type Thinking } from '../shared/models';
+import { storedAppearance, validateAppearance } from '@shared/appearance';
+import { attachmentDirectories, requireAttachmentId, validatePng } from '@shared/attachments';
+import type { Assistant, Attachment, Conversation, Message, Result, Snapshot } from '@shared/protocol';
+import { defaultModel, requireModel, requireThinking, supportsImageInput, type Thinking } from '@shared/models';
 
 type AssistantRow = Omit<Assistant, 'appearance'> & { appearance: string | null };
 type AttachmentRow = Attachment & { storageName: string };

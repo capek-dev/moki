@@ -3,10 +3,10 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '../src/backend/store';
-import { Chat, history, type Generate, type Turn } from '../src/backend/chat';
-import { applyResult } from '../src/renderer/chat-state';
-import type { Attachment, Message, Result } from '../src/shared/protocol';
+import { Store } from '@backend/store';
+import { Chat, history, type Generate, type Turn } from '@backend/chat';
+import { applyResult } from '@renderer/lib/chat-state';
+import type { Attachment, Message, Result } from '@shared/protocol';
 
 const credentials = { provider: 'deepseek' as const, key: 'test-secret' };
 function setup(generate: Generate) {

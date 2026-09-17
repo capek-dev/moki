@@ -2,8 +2,8 @@ import { nativeImage, shell, type BrowserWindow } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { attachmentDirectories, requireAttachmentId, validatePng } from '../shared/attachments';
-import type { CaptureEvent } from '../shared/protocol';
+import { attachmentDirectories, requireAttachmentId, validatePng } from '@shared/attachments';
+import type { CaptureEvent } from '@shared/protocol';
 
 export class ScreenshotCapture {
   private child?: ChildProcess;

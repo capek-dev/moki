@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '../src/backend/store';
-import { Chat, type Turn } from '../src/backend/chat';
+import { Store } from '@backend/store';
+import { Chat, type Turn } from '@backend/chat';
 
 const credentials = { provider: 'deepseek' as const, key: 'test-secret' };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -93,9 +93,9 @@ test('edit-resend atomically replaces the tail and rebuilds provider history', a
 
 test('renderer and main-process boundaries expose unsend and edit safely', async () => {
   const [main, runtime, app] = await Promise.all([
-    Bun.file(new URL('../src/electron/main.ts', import.meta.url)).text(),
-    Bun.file(new URL('../src/electron/runtime.ts', import.meta.url)).text(),
-    Bun.file(new URL('../src/renderer/app.tsx', import.meta.url)).text(),
+    Bun.file('src/electron/main.ts').text(),
+    Bun.file('src/electron/runtime.ts').text(),
+    Bun.file('src/renderer/windows/chat-window.tsx').text(),
   ]);
   expect(main).toContain("'cancelChat', 'revertMessage']");
   expect(main).toContain('editOf: input.editOf');

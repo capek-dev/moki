@@ -3,9 +3,9 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { databasePath, userDataPath } from '../src/shared/data-paths';
-import { Store } from '../src/backend/store';
-import { INITIAL_APPEARANCE } from '../src/shared/appearance';
+import { databasePath, userDataPath } from '@shared/data-paths';
+import { Store } from '@backend/store';
+import { INITIAL_APPEARANCE } from '@shared/appearance';
 
 function fixture(run: (dir: string) => void) {
   const dir = mkdtempSync(join(tmpdir(), 'moki-rename-'));

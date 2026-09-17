@@ -1,10 +1,10 @@
 import { mkdirSync } from 'node:fs';
-import { databasePath } from '../shared/data-paths';
+import { databasePath } from '@shared/data-paths';
 import { createInterface } from 'node:readline';
-import { Store } from './store';
-import { Chat } from './chat';
-import { generate } from './model-stream';
-import type { Result } from '../shared/protocol';
+import { Store } from '@backend/store';
+import { Chat } from '@backend/chat';
+import { generate } from '@backend/model-stream';
+import type { Result } from '@shared/protocol';
 // Import the published composition entry point in the compiled runtime proof.
 import * as capek from '@capekai/core/composition';
 

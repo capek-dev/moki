@@ -1,17 +1,17 @@
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, Tray, safeStorage, shell } from 'electron';
-import { requireCopyText, requireWebLink } from '../shared/answer-actions';
-import { attachmentDirectories, requireAttachmentId } from '../shared/attachments';
-import { ScreenshotCapture } from './screenshot-capture';
-import { EncryptedVault, ProviderConnections } from './provider-connections';
+import { requireCopyText, requireWebLink } from '@shared/answer-actions';
+import { attachmentDirectories, requireAttachmentId } from '@shared/attachments';
+import { ScreenshotCapture } from '@electron/screenshot-capture';
+import { EncryptedVault, ProviderConnections } from '@electron/provider-connections';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { Runtime } from './runtime';
-import { requireThinking } from '../shared/models';
-import type { ChatRequest, Request, Result } from '../shared/protocol';
-import { userDataPath } from '../shared/data-paths';
+import { Runtime } from '@electron/runtime';
+import { requireThinking } from '@shared/models';
+import type { ChatRequest, Request, Result } from '@shared/protocol';
+import { userDataPath } from '@shared/data-paths';
 
-import { DEV_ORIGIN, isDevelopment } from '../shared/development';
+import { DEV_ORIGIN, isDevelopment } from '@shared/development';
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'moki-attachment', privileges: { secure: true, supportFetchAPI: true } }]);
 const development = isDevelopment(app.isPackaged, process.env.MOKI_DEV);

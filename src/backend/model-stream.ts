@@ -2,8 +2,8 @@ import { streamText } from 'ai';
 import { createOpenAiResponsesModel } from '@capekai/core/providers';
 import { getModelWithMetadata } from '@capekai/core/execution';
 import { createSingleModelConfiguration, withRuntimeConfiguration } from '@capekai/core/configuration';
-import type { Generate } from './chat';
-import { requireThinking } from '../shared/models';
+import type { Generate } from '@backend/chat';
+import { requireThinking } from '@shared/models';
 
 export function codexFetch(access: string, accountId: string, fetcher: typeof fetch = fetch): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {

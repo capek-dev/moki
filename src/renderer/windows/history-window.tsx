@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Result, Snapshot } from '../shared/protocol';
-import { Companion, INITIAL_APPEARANCE } from './companion';
-import { useTone } from './tone';
-import { platformClass } from './platform';
-import { canChatWithMoki, mokiAssistant } from './moki';
+import type { Result, Snapshot } from '@shared/protocol';
+import { Companion, INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
+import { useTone } from '@renderer/lib/tone';
+import { platformClass } from '@renderer/lib/platform';
+import { canChatWithMoki, mokiAssistant } from '@renderer/lib/moki';
 
 // Sessions live in their own window: picking one tells the chat window through
 // the storage event (same cross-window channel the tone uses), then closes.

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { ProviderConnections, type Vault } from '../src/electron/provider-connections';
+import { ProviderConnections, type Vault } from '@electron/provider-connections';
 function fixture() {
   let saved: ReturnType<Vault['read']> = { version: 1, codex: { access: 'expired', refresh: 'refresh', accountId: 'account', expires: 0 } };
   let resolve!: (response: Response) => void;

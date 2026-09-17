@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Button } from './ui/button';
-import { Check } from './ui/icons';
+import { Button } from '@renderer/components/ui/button';
+import { Check } from '@renderer/components/ui/icons';
 
 type CopyState = 'idle' | 'copying' | 'copied' | 'failed';
 

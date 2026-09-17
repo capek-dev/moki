@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import { Companion, INITIAL_APPEARANCE, PALETTES, type Mood } from '../src/renderer/companion';
+import { Companion, INITIAL_APPEARANCE, PALETTES, type Mood } from '@renderer/components/companion/companion';
 
 test('all creature shapes, palettes, accessories and activity states render self-contained SVG', () => {
   for (const shape of ['pebble', 'mochi', 'puff'] as const)

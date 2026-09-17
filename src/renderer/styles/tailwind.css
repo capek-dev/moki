@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "./companion.css";
 
-@source "./**/*.{ts,tsx}";
+@source "../**/*.{ts,tsx}";
 
 /* ---------------------------------------------------------------------------
    Design tokens. Neutral graphite base; the accent comes from the user's tone

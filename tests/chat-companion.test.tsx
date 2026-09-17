@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { Message } from '../src/shared/protocol';
-import { ChatCompanion, chatMood } from '../src/renderer/chat-companion';
-import { INITIAL_APPEARANCE } from '../src/renderer/companion';
+import type { Message } from '@shared/protocol';
+import { ChatCompanion, chatMood } from '@renderer/components/companion/chat-companion';
+import { INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
 
 function reply(overrides: Partial<Message> = {}): Message {
   return { id: 'reply', conversationId: 'chat', role: 'assistant', text: '', status: 'streaming', model: null, assistantName: null, error: null, thinking: null, ...overrides };

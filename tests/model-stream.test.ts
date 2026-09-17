@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createGenerate, codexFetch } from '../src/backend/model-stream';
-import type { Turn } from '../src/backend/chat';
+import { createGenerate, codexFetch } from '@backend/model-stream';
+import type { Turn } from '@backend/chat';
 
 const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.6-sol', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };
 test('published DeepSeek adapter serializes history and streams in an isolated process', async () => {

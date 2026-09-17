@@ -23,7 +23,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const chunk = (delta: unknown, finish_reason: string | null = null) => ({ id: 'chat_1', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] });
   return new Response([chunk({ role: 'assistant', content: 'Hello' }), chunk({}, 'stop')].map((value) => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
 }) as typeof fetch;
-const { generate } = await import('../../src/backend/model-stream');
+const { generate } = await import('@backend/model-stream');
 for (const level of [null, 'high', 'max'] as const) {
 thinking = level;
 let output = '';

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { callbackHandler, type CallbackListener } from '../src/electron/oauth-listener';
-import { ProviderConnections, type Vault } from '../src/electron/provider-connections';
+import { callbackHandler, type CallbackListener } from '@electron/oauth-listener';
+import { ProviderConnections, type Vault } from '@electron/provider-connections';
 
 function fixture(failListen = false) {
   let complete!: (url: string) => Promise<void>;

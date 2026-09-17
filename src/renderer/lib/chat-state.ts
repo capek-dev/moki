@@ -1,4 +1,4 @@
-import type { Result, Snapshot } from '../shared/protocol';
+import type { Result, Snapshot } from '@shared/protocol';
 
 export interface ChatState { data?: Snapshot; revision: number; histories: Record<string, number> }
 export function applyResult(state: ChatState, result: Result): ChatState {

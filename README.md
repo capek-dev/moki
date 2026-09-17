@@ -54,6 +54,8 @@ bun run desktop
 
 Run `bun run dev` to build the isolated Electron shell/backend, start Vite on `127.0.0.1:5173`, and open **Moki Dev** with detached DevTools. Right-click **Inspect Element**, or press **Cmd+Option+I**, in chat, Settings, or History.
 
+Imports use path aliases only, never relative paths: `@shared/*`, `@renderer/*`, `@electron/*`, `@backend/*`, `@scripts/*`. They are defined once in `tsconfig.json` and honored by TypeScript, Bun (runtime and bundler), and the Vite dev server.
+
 On macOS, the first run prepares the ignored `dist/dev-shell/Moki Dev.app` with the stable bundle identifier `app.moki.desktop.dev` and a Screen Recording usage description. Grant Screen Recording to that exact app, not `node_modules/electron/dist/Electron.app`. After changing the permission, fully quit and rerun `bun run dev`. The cached app is rebuilt only when its preparation revision or Electron version changes.
 
 React component and CSS changes hot reload. Source maps expose TSX in DevTools. Changes to Electron, preload, backend, or build configuration require stopping and rerunning `bun run dev`. Some shared-module edits cause a full page reload, which resets unsent drafts.

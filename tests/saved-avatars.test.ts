@@ -3,9 +3,9 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '../src/backend/store';
-import { INITIAL_APPEARANCE, validateAppearance } from '../src/shared/appearance';
-import { applyResult } from '../src/renderer/chat-state';
+import { Store } from '@backend/store';
+import { INITIAL_APPEARANCE, validateAppearance } from '@shared/appearance';
+import { applyResult } from '@renderer/lib/chat-state';
 
 const assistant = { id: 'work', name: 'Work', provider: 'codex', instructions: 'Be concise.' };
 const appearance = { ...INITIAL_APPEARANCE, outfit: 'suit' as const, palette: 'sky' as const, accessory: 'glasses' as const };

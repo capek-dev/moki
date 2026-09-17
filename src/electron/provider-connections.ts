@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { listenForOAuth, type CallbackListener } from './oauth-listener';
-import type { ProviderCommand, ProviderState } from '../shared/protocol';
+import { listenForOAuth, type CallbackListener } from '@electron/oauth-listener';
+import type { ProviderCommand, ProviderState } from '@shared/protocol';
 
 const CLIENT = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const REDIRECT = 'http://localhost:1455/auth/callback';
@@ -166,7 +166,7 @@ export class ProviderConnections {
   }
   private refresh?: { generation: number; promise: Promise<void> };
   // Main-process-only access. Never return this value through renderer IPC.
-  async credentials(provider: 'deepseek' | 'codex'): Promise<import('../backend/chat').Credentials> {
+  async credentials(provider: 'deepseek' | 'codex'): Promise<import('@backend/chat').Credentials> {
     if (provider === 'deepseek') {
       const key = this.load().deepseek;
       if (!key) throw new Error('Connect DeepSeek in Settings first.');

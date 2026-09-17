@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { AttachmentDraft, Message, Request, Result } from '../shared/protocol';
-import { MODELS, defaultModel, supportsImageInput, thinkingLevels, type Thinking } from '../shared/models';
-import { AttachmentImage } from './attachment-image';
-import { applyResult, type ChatState } from './chat-state';
-import { Companion, INITIAL_APPEARANCE } from './companion';
-import { ChatCompanion } from './chat-companion';
-import { Answer } from './answer';
-import { useTone, rememberPalette } from './tone';
-import { platformClass } from './platform';
-import { Button } from './ui/button';
-import { SimpleSelect } from './ui/select';
-import { canChatWithMoki, mokiAssistant } from './moki';
-import { Banner } from './ui/panel';
-import { ArrowUp, Capture, Clock, Gear, Pencil, Plus, Stop, Undo, Zap } from './ui/icons';
+import type { AttachmentDraft, Message, Request, Result } from '@shared/protocol';
+import { MODELS, defaultModel, supportsImageInput, thinkingLevels, type Thinking } from '@shared/models';
+import { AttachmentImage } from '@renderer/components/chat/attachment-image';
+import { applyResult, type ChatState } from '@renderer/lib/chat-state';
+import { Companion, INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
+import { ChatCompanion } from '@renderer/components/companion/chat-companion';
+import { Answer } from '@renderer/components/chat/answer';
+import { useTone, rememberPalette } from '@renderer/lib/tone';
+import { platformClass } from '@renderer/lib/platform';
+import { Button } from '@renderer/components/ui/button';
+import { SimpleSelect } from '@renderer/components/ui/select';
+import { canChatWithMoki, mokiAssistant } from '@renderer/lib/moki';
+import { Banner } from '@renderer/components/ui/panel';
+import { ArrowUp, Capture, Clock, Gear, Pencil, Plus, Stop, Undo, Zap } from '@renderer/components/ui/icons';
 
 const AUTO_THINKING = 'auto';
 

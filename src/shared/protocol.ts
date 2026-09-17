@@ -1,6 +1,6 @@
-import type { Thinking } from './models';
+import type { Thinking } from '@shared/models';
 export type Provider = 'deepseek' | 'codex';
-export interface Assistant { id: string; name: string; provider: Provider; instructions: string; appearance?: import('./appearance').Appearance }
+export interface Assistant { id: string; name: string; provider: Provider; instructions: string; appearance?: import('@shared/appearance').Appearance }
 export interface Conversation { id: string; assistantId: string; title: string; model: string | null; thinking: Thinking | null }
 export interface Message { id: string; conversationId: string; text: string; role: 'user' | 'assistant'; status: 'complete' | 'streaming' | 'interrupted' | 'failed'; model: string | null; assistantName: string | null; error: string | null; thinking: Thinking | null }
 export interface Attachment { id: string; messageId: string; mime: 'image/png'; byteSize: number; width: number; height: number }

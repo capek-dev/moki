@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import type { ChatRequest, Request, Result } from '../shared/protocol';
-import type { Credentials } from '../backend/chat';
+import type { ChatRequest, Request, Result } from '@shared/protocol';
+import type { Credentials } from '@backend/chat';
 
 export class Runtime {
   private child: ChildProcessWithoutNullStreams;

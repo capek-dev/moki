@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes } from 'react';
-import { cn } from './cn';
+import { cn } from '@renderer/components/ui/cn';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 type Size = 'sm' | 'md' | 'icon' | 'icon-sm' | 'round' | 'round-sm';

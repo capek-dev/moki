@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import type { Attachment, AttachmentDraft } from '../shared/protocol';
-import { attachmentUrl } from '../shared/attachments';
-import { Button } from './ui/button';
-import { Close } from './ui/icons';
+import type { Attachment, AttachmentDraft } from '@shared/protocol';
+import { attachmentUrl } from '@shared/attachments';
+import { Button } from '@renderer/components/ui/button';
+import { Close } from '@renderer/components/ui/icons';
 
 type ImageAttachment = Attachment | AttachmentDraft;
 

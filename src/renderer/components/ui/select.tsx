@@ -1,7 +1,7 @@
 import * as SelectPrimitive from '@radix-ui/react-select';
 import type { ComponentProps, ReactNode } from 'react';
-import { cn } from './cn';
-import { Check, ChevronDown } from './icons';
+import { cn } from '@renderer/components/ui/cn';
+import { Check, ChevronDown } from '@renderer/components/ui/icons';
 
 export const Select = SelectPrimitive.Root;
 export const SelectValue = SelectPrimitive.Value;

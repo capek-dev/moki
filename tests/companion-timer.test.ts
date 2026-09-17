@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { scheduleDoneReset } from '../src/renderer/chat-companion';
+import { scheduleDoneReset } from '@renderer/components/companion/chat-companion';
 
 test('completion resets after three seconds; cleanup cancels stale resets', async () => {
   let cancelledCalls = 0;

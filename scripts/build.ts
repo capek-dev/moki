@@ -14,7 +14,7 @@ if (development) {
   await writeFile('dist/dev/package.json', JSON.stringify({ name: 'moki-dev', productName: 'Moki Dev', version: '0.0.0', main: 'dist/electron/main.cjs' }));
 } else {
   await mkdir(`${out}/renderer`, { recursive: true });
-  const tailwind = Bun.spawn([process.execPath, 'node_modules/@tailwindcss/cli/dist/index.mjs', '--input', 'src/renderer/tailwind.css', '--output', `${out}/renderer/app.css`, '--minify'], { stdout: 'inherit', stderr: 'inherit' });
+  const tailwind = Bun.spawn([process.execPath, 'node_modules/@tailwindcss/cli/dist/index.mjs', '--input', 'src/renderer/styles/tailwind.css', '--output', `${out}/renderer/app.css`, '--minify'], { stdout: 'inherit', stderr: 'inherit' });
   if (await tailwind.exited !== 0) throw new Error('Tailwind build failed.');
   await bundle({ entrypoints: ['src/renderer/entry.tsx'], outdir: `${out}/renderer`, naming: 'app.js', target: 'browser', minify: true, define: { 'process.env.NODE_ENV': JSON.stringify('production') } });
   await copyFile('src/renderer/index.html', `${out}/renderer/index.html`);

@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { Store } from '../src/backend/store';
-import { canChatWithMoki, mokiAssistant } from '../src/renderer/moki';
-import { INITIAL_APPEARANCE } from '../src/shared/appearance';
-import type { Assistant, Conversation } from '../src/shared/protocol';
+import { Store } from '@backend/store';
+import { canChatWithMoki, mokiAssistant } from '@renderer/lib/moki';
+import { INITIAL_APPEARANCE } from '@shared/appearance';
+import type { Assistant, Conversation } from '@shared/protocol';
 
 const moki: Assistant = { id: 'moki', name: 'Custom name', provider: 'codex', instructions: 'Keep this.', appearance: { ...INITIAL_APPEARANCE } };
 const other: Assistant = { ...moki, id: 'other', name: 'Other', provider: 'deepseek' };
@@ -55,9 +55,9 @@ test('editing Moki and creating a new chat preserve other records, messages, and
 });
 
 test('renderer wiring removes identity management and guards earlier history without losing Stop', () => {
-  const app = readFileSync('src/renderer/app.tsx', 'utf8');
-  const settings = readFileSync('src/renderer/settings.tsx', 'utf8');
-  const history = readFileSync('src/renderer/history.tsx', 'utf8');
+  const app = readFileSync('src/renderer/windows/chat-window.tsx', 'utf8');
+  const settings = readFileSync('src/renderer/windows/settings-window.tsx', 'utf8');
+  const history = readFileSync('src/renderer/windows/history-window.tsx', 'utf8');
   for (const source of [app, settings, history]) expect(source).toContain('mokiAssistant(data?.assistants)');
   expect(app).not.toContain('setAssistantId');
   expect(app).not.toContain('<SelectTrigger');

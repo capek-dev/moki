@@ -1,9 +1,9 @@
 import { memo, useState, type ComponentProps } from 'react';
 import Markdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { webLink } from '../shared/answer-actions';
-import { CopyButton } from './copy-button';
-import { Copy } from './ui/icons';
+import { webLink } from '@shared/answer-actions';
+import { CopyButton } from '@renderer/components/chat/copy-button';
+import { Copy } from '@renderer/components/ui/icons';
 
 function AnswerLink({ href, children }: ComponentProps<'a'> & ExtraProps) {
   const [failed, setFailed] = useState(false);

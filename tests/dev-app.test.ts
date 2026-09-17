@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-const helper = await Bun.file(new URL('../scripts/dev-app.ts', import.meta.url)).text();
-const launcher = await Bun.file(new URL('../scripts/dev.ts', import.meta.url)).text();
+const helper = await Bun.file('scripts/dev-app.ts').text();
+const launcher = await Bun.file('scripts/dev.ts').text();
 
 test('development launches through a stable screen-recording app identity', () => {
   expect(helper).toContain("'Moki Dev.app'");

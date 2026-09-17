@@ -1,4 +1,4 @@
-import { TONES, type FixedTone, type ToneChoice } from './tone';
+import { TONES, type FixedTone, type ToneChoice } from '@renderer/lib/tone';
 
 /** Swatches for the app tone. "Match avatar" follows the companion palette. */
 export function TonePicker({ choice, onChoose }: { choice: ToneChoice; onChoose: (choice: ToneChoice) => void }) {

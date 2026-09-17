@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from 'react';
-import type { Appearance } from '../shared/appearance';
+import type { Appearance } from '@shared/appearance';
 
 // The app tone is the user's accent color for the whole UI. "auto" follows the
 // palette of the companion they chat with, so the chrome matches the avatar.
