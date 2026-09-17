@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Tray, safeStorage, shell } from 'electron';
+import { requireCopyText, requireWebLink } from '../shared/answer-actions';
 import { EncryptedVault, ProviderConnections } from './provider-connections';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -127,6 +128,14 @@ else {
     });
     ipcMain.handle('moki:settings', (event) => { assertTrusted(event); return openSettings(); });
     ipcMain.handle('moki:history', (event) => { assertTrusted(event); return openHistory(); });
+    ipcMain.handle('moki:copy-text', (event, text: unknown) => {
+      assertTrusted(event);
+      clipboard.writeText(requireCopyText(text));
+    });
+    ipcMain.handle('moki:open-web-link', (event, url: unknown) => {
+      assertTrusted(event);
+      return shell.openExternal(requireWebLink(url));
+    });
     ipcMain.handle('moki:request', async (event, input: unknown) => {
       assertTrusted(event);
       // Explicit ingress allowlist blocks private credential-bearing pipe commands.

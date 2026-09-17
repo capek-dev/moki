@@ -16,6 +16,14 @@ Automated verification uses offline provider responses; live model access and na
 
 Provider-focused checks: `bun test tests/provider-connections.test.ts tests/settings-window.test.ts tests/desktop-paths.test.ts` after building.
 
+## Readable answers
+
+Assistant replies render Markdown with headings, lists, tables, quotes, and code blocks, including partial replies. User messages stay plain text. **Copy answer** copies the original Markdown; **Copy code** copies only that block's text. Both report clipboard success or failure.
+
+Raw HTML is disabled. Images display alt text without loading remote resources. HTTP(S) links open in the default browser on click; file, script, relative, and credential-bearing URLs are not clickable. Clipboard access is write-only through validated Electron IPC.
+
+Focused checks: `bun test tests/answer.test.tsx`. Native clipboard, browser opening, and visual layout still require manual Electron verification.
+
 ## Single Moki
 
 Chat and settings expose one Moki, with no companion picker or creation flow. Existing assistant records remain intact for future multi-assistant support. Earlier conversations belonging to other records remain visible in History as read-only; New conversation always uses Moki. Stored custom names and historical attribution are not rewritten. Dynamic memory and skill loading are a future capability, not part of this UI change.

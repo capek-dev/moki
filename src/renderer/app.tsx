@@ -4,6 +4,7 @@ import { MODELS, defaultModel, thinkingLevels, type Thinking } from '../shared/m
 import { applyResult, type ChatState } from './chat-state';
 import { Companion, INITIAL_APPEARANCE } from './companion';
 import { ChatCompanion } from './chat-companion';
+import { Answer } from './answer';
 import { useTone, rememberPalette } from './tone';
 import { platformClass } from './platform';
 import { Button } from './ui/button';
@@ -148,8 +149,9 @@ export function App() {
             <div className="grid min-w-0 flex-1 gap-1.5 self-start">
               {earlier && message.assistantName && <p className="text-[11px] text-ink-3">{message.assistantName}</p>}
               {message.text
-                ? <p className="message-text text-[13.5px] leading-relaxed text-ink">{message.text}{message.status === 'interrupted' && <span className="ml-1.5 text-[11px] text-ink-3">stopped</span>}</p>
+                ? <Answer text={message.text} />
                 : message.status === 'streaming' && <p className="text-[13.5px] text-ink-3">Thinking…</p>}
+              {message.status === 'interrupted' && <p className="text-[11px] text-ink-3">stopped</p>}
               {message.error && <Banner>{message.error}</Banner>}
             </div>
           </article>

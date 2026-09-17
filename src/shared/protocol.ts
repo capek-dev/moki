@@ -27,6 +27,8 @@ export interface DesktopAPI {
   request(request: Request): Promise<Result>;
   openSettings(): Promise<void>;
   openHistory(): Promise<void>;
+  copyText(text: string): Promise<void>;
+  openWebLink(url: string): Promise<void>;
   onState(listener: (result: Result) => void): () => void;
 }
 

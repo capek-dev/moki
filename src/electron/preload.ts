@@ -16,6 +16,8 @@ const api: DesktopAPI = {
   request: (request) => ipcRenderer.invoke('moki:request', request),
   openSettings: () => ipcRenderer.invoke('moki:settings'),
   openHistory: () => ipcRenderer.invoke('moki:history'),
+  copyText: (text) => ipcRenderer.invoke('moki:copy-text', text),
+  openWebLink: (url) => ipcRenderer.invoke('moki:open-web-link', url),
   onState: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, result: Parameters<typeof listener>[0]) => listener(result);
     ipcRenderer.on('moki:state', handler);
