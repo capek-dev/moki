@@ -3,15 +3,27 @@ import type { Assistant, Result, Snapshot } from '../shared/protocol';
 import { ProviderSettings } from './provider-settings';
 import { AppearancePreview } from './appearance-preview';
 import { Companion, INITIAL_APPEARANCE } from './companion';
+import { TonePicker } from './tone-picker';
+import { useTone } from './tone';
+import { platformClass } from './platform';
+import { Button } from './ui/button';
+import { Segmented } from './ui/segmented';
+import { Panel } from './ui/panel';
+import { Field, Input, Textarea } from './ui/field';
+import { SimpleSelect } from './ui/select';
+
+const SECTIONS = ['Assistants', 'Appearance', 'Providers', 'Integrations'] as const;
+const PROVIDER_LABELS = { deepseek: 'DeepSeek', codex: 'Codex subscription' } as const;
 
 export function Settings() {
-  const [section, setSection] = useState('Assistants');
+  const [section, setSection] = useState<string>('Assistants');
   const [data, setData] = useState<Snapshot>();
   const [editing, setEditing] = useState<Assistant>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const revision = useRef(0);
   const saving = useRef(false);
+  const { choice, choose } = useTone();
   function accept(result: Result) {
     if ((result.revision ?? 0) < revision.current) return;
     revision.current = result.revision ?? 0;
@@ -26,40 +38,89 @@ export function Settings() {
     void load();
     return unsubscribe;
   }, []);
-  return <main>
-    <header><span className="avatar" aria-hidden="true">✿</span><h1>Settings</h1></header>
-    <nav className="settings-navigation" aria-label="Settings sections">{['Assistants', 'Providers', 'Integrations'].map((name) =>
-      <button key={name} aria-pressed={section === name} onClick={() => setSection(name)}>{name}</button>)}</nav>
-    <section className="settings">
+  return <main className={`flex h-dvh flex-col ${platformClass ?? ''}`}>
+    <header className="titlebar flex min-h-12 items-end pb-2">
+      <h1 className="pl-1 text-[13px] font-semibold tracking-[.02em] text-ink">Settings</h1>
+    </header>
+    <nav className="px-4 pb-4" aria-label="Settings sections">
+      <Segmented value={section} onChange={setSection} aria-label="Settings sections" options={SECTIONS.map((name) => ({ value: name, label: name }))} />
+    </nav>
+    <section className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
       {section === 'Assistants' && <>
-        {editing ? <form onSubmit={async (event) => {
-          event.preventDefault();
-          if (saving.current) return;
-          saving.current = true; setBusy(true); setError('');
-          try {
-            accept(await window.povondra.request({ method: 'saveAssistant', assistant: editing }));
-            setEditing(undefined);
-          } catch (e) { setError(String(e)); }
-          finally { saving.current = false; setBusy(false); }
-        }}>
-          <h2>Your assistant</h2>
-          <fieldset disabled={busy}>
-            <label>Name<input required maxLength={80} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
-            <label>Provider<select value={editing.provider} onChange={(e) => setEditing({ ...editing, provider: e.target.value as Assistant['provider'] })}><option value="deepseek">DeepSeek</option><option value="codex">Codex subscription</option></select></label>
-            <label>How should they help?<textarea rows={6} maxLength={16000} value={editing.instructions} onChange={(e) => setEditing({ ...editing, instructions: e.target.value })} /></label>
-            <p className="muted">Connect your provider in the Providers section. Select the model in each conversation.</p>
-            <AppearancePreview appearance={editing.appearance ?? INITIAL_APPEARANCE} onChange={(appearance) => setEditing({ ...editing, appearance })} />
-            <div className="actions"><button type="button" onClick={() => setEditing(undefined)}>Cancel</button><button className="primary" disabled={!editing.name.trim()}>{busy ? 'Saving…' : 'Save assistant'}</button></div>
-          </fieldset>
-        </form> : <>
-          <h2>Your companions</h2><p className="muted">Give each assistant a name and instructions. Choose who to chat with in the chat window.</p>
-          {data?.assistants.map((assistant) => <div className="actions" key={assistant.id}><span className="saved-companion"><Companion appearance={assistant.appearance ?? INITIAL_APPEARANCE} paused /></span><p><strong>{assistant.name}</strong><br /><small>{assistant.provider === 'codex' ? 'Codex subscription' : 'DeepSeek'}</small></p><button onClick={() => setEditing({ ...assistant })}>Edit {assistant.name}</button></div>)}
-          <button className="primary" disabled={!data} onClick={() => setEditing({ id: crypto.randomUUID(), name: '', provider: 'deepseek', instructions: '', appearance: { ...INITIAL_APPEARANCE } })}>Add assistant</button>
-        </>}
+        {editing ? <Panel>
+          <form className="grid gap-4" onSubmit={async (event) => {
+            event.preventDefault();
+            if (saving.current) return;
+            saving.current = true; setBusy(true); setError('');
+            try {
+              accept(await window.povondra.request({ method: 'saveAssistant', assistant: editing }));
+              setEditing(undefined);
+            } catch (e) { setError(String(e)); }
+            finally { saving.current = false; setBusy(false); }
+          }}>
+            <h2 className="text-[15px] font-semibold">Your companion</h2>
+            <fieldset className="grid gap-4" disabled={busy}>
+              <Field label="Name" htmlFor="assistant-name">
+                <Input id="assistant-name" required maxLength={80} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              </Field>
+              <Field label="Provider" htmlFor="assistant-provider">
+                <SimpleSelect
+                  id="assistant-provider"
+                  value={editing.provider}
+                  onValueChange={(provider) => setEditing({ ...editing, provider: provider as Assistant['provider'] })}
+                  options={Object.entries(PROVIDER_LABELS).map(([value, label]) => ({ value, label }))} />
+              </Field>
+              <Field label="How should they help?" htmlFor="assistant-instructions">
+                <Textarea id="assistant-instructions" rows={6} maxLength={16000} value={editing.instructions} onChange={(e) => setEditing({ ...editing, instructions: e.target.value })} />
+              </Field>
+              <AppearancePreview appearance={editing.appearance ?? INITIAL_APPEARANCE} onChange={(appearance) => setEditing({ ...editing, appearance })} />
+              <p className="text-[12px] text-ink-3">Connect your provider in the Providers section. Select the model in each conversation.</p>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setEditing(undefined)}>Cancel</Button>
+                <Button variant="primary" type="submit" disabled={!editing.name.trim()}>{busy ? 'Saving…' : 'Save companion'}</Button>
+              </div>
+            </fieldset>
+          </form>
+        </Panel> : <div className="grid gap-3">
+          <div>
+            <h2 className="text-[15px] font-semibold">Your companions</h2>
+            <p className="mt-0.5 text-[12.5px] text-ink-3">Give each companion a name, a look, and instructions. Choose who to chat with in the chat window.</p>
+          </div>
+          {data?.assistants.map((assistant) => <Panel key={assistant.id} className="flex items-center gap-3 p-3">
+            <span className="w-10 shrink-0"><Companion appearance={assistant.appearance ?? INITIAL_APPEARANCE} paused /></span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-medium">{assistant.name}</p>
+              <p className="text-[11.5px] text-ink-3">{PROVIDER_LABELS[assistant.provider]}</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setEditing({ ...assistant })}>Edit</Button>
+          </Panel>)}
+          <Button variant="secondary" disabled={!data} onClick={() => setEditing({ id: crypto.randomUUID(), name: '', provider: 'deepseek', instructions: '', appearance: { ...INITIAL_APPEARANCE } })}>Add companion</Button>
+        </div>}
       </>}
+      {section === 'Appearance' && <Panel className="grid max-w-md gap-4">
+        <div>
+          <h2 className="text-[15px] font-semibold">Appearance</h2>
+          <p className="mt-0.5 text-[12.5px] text-ink-3">Pick the tone of the app. Match avatar follows the companion you chat with, and both windows update live.</p>
+        </div>
+        <TonePicker choice={choice} onChoose={choose} />
+      </Panel>}
       <div hidden={section !== 'Providers'}><ProviderSettings /></div>
-      {section === 'Integrations' && <><h2>Integrations</h2><p>MCP connections will be managed here, with access enabled separately for each assistant.</p><h3>cua.ai computer use</h3><p className="muted">Required for the MVP, not connected yet. Computer control will require explicit setup and consent.</p></>}
+      {section === 'Integrations' && <div className="grid gap-3">
+        <Panel className="grid gap-1.5">
+          <h2 className="text-[15px] font-semibold">Integrations</h2>
+          <p className="text-[13px] text-ink-2">MCP connections will be managed here, with access enabled separately for each companion.</p>
+        </Panel>
+        <Panel className="grid gap-1.5 opacity-70">
+          <h3 className="text-[13px] font-semibold">cua.ai computer use</h3>
+          <p className="text-[12.5px] text-ink-3">Required for the MVP, not connected yet. Computer control will require explicit setup and consent.</p>
+        </Panel>
+      </div>}
     </section>
-    {error && <div className="error" role="alert">{error}{!data && <button onClick={() => void load()}>Retry connection</button>}</div>}
+    {error && <div className="px-4 pb-4">
+      <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-[color-mix(in_oklab,var(--danger)_28%,transparent)] bg-danger-soft px-3 py-2.5 text-[12.5px] text-danger">
+        <span>{error}</span>
+        {!data && <Button variant="secondary" size="sm" disabled={busy} onClick={() => void load()}>Retry connection</Button>}
+      </div>
+    </div>}
   </main>;
 }

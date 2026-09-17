@@ -15,6 +15,7 @@ const api: DesktopAPI = {
   },
   request: (request) => ipcRenderer.invoke('povondra:request', request),
   openSettings: () => ipcRenderer.invoke('povondra:settings'),
+  openHistory: () => ipcRenderer.invoke('povondra:history'),
   onState: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, result: Parameters<typeof listener>[0]) => listener(result);
     ipcRenderer.on('povondra:state', handler);

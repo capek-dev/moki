@@ -1,0 +1,163 @@
+@import "tailwindcss";
+@import "./companion.css";
+
+@source "./**/*.{ts,tsx}";
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Neutral graphite base; the accent comes from the user's tone
+   choice (tone.ts writes --tone-light/--tone-dark at runtime). Tailwind maps
+   everything into utilities via `@theme inline`.
+--------------------------------------------------------------------------- */
+:root {
+  --page: color-mix(in oklab, var(--accent) 4%, rgb(244 244 246 / .62));
+  --ink: #212329;
+  --ink-2: #5d6169;
+  --ink-3: #90939a;
+  --line: rgb(0 0 0 / .08);
+  --line-strong: rgb(0 0 0 / .16);
+  --surface: color-mix(in oklab, var(--accent) 5%, rgb(255 255 255 / .6));
+  --surface-2: color-mix(in oklab, var(--accent) 4%, rgb(255 255 255 / .48));
+  --surface-solid: color-mix(in oklab, var(--accent) 3%, rgb(252 252 253 / .95));
+  --hover: rgb(0 0 0 / .05);
+  --danger: #c23b4e;
+  --danger-soft: rgb(194 59 78 / .1);
+  --ok: #2e9c62;
+  /* Tone defaults (graphite); tone.ts overrides per user choice / avatar palette. */
+  --tone-light: #4a4b52;
+  --tone-dark: #a7a8b3;
+  --accent: var(--tone-light);
+  --accent-ink: #ffffff;
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in oklab, var(--accent) 32%, transparent);
+  --accent-deep: color-mix(in oklab, var(--accent) 84%, black);
+  --shadow-glass: 0 10px 34px rgb(20 20 24 / .12), 0 2px 8px rgb(20 20 24 / .06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: color-mix(in oklab, var(--accent) 6%, rgb(20 20 23 / .62));
+    --ink: #f0f0f4;
+    --ink-2: #a9adb6;
+    --ink-3: #7b7e86;
+    --line: rgb(255 255 255 / .1);
+    --line-strong: rgb(255 255 255 / .2);
+    --surface: color-mix(in oklab, var(--accent) 7%, rgb(30 30 34 / .55));
+    --surface-2: color-mix(in oklab, var(--accent) 7%, rgb(255 255 255 / .07));
+    --surface-solid: color-mix(in oklab, var(--accent) 4%, rgb(30 30 33 / .96));
+    --hover: rgb(255 255 255 / .08);
+    --danger: #f0717e;
+    --danger-soft: rgb(240 113 126 / .14);
+    --ok: #5cbb85;
+    --accent: var(--tone-dark);
+    --shadow-glass: 0 10px 34px rgb(0 0 0 / .45), 0 2px 8px rgb(0 0 0 / .3);
+  }
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --color-page: var(--page);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-solid: var(--surface-solid);
+  --color-hover: var(--hover);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-accent-deep: var(--accent-deep);
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+@layer base {
+  html { color-scheme: light dark; height: 100%; }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  ::selection { background: color-mix(in oklab, var(--accent) 24%, transparent); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--ink) 16%, transparent);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--ink) 28%, transparent); background-clip: content-box; }
+}
+
+/* ---------------------------------------------------------------------------
+   Glass surfaces over the macOS vibrancy material; solid enough alone on
+   platforms without vibrancy.
+--------------------------------------------------------------------------- */
+@utility glass {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+}
+
+@utility glass-solid {
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+}
+
+@layer components {
+  /* Tone picker swatches. */
+  .tone-swatch { height: 1.75rem; width: 1.75rem; }
+  .tone-swatch[aria-checked='true'] { box-shadow: 0 0 0 2px var(--page), 0 0 0 4px var(--accent); }
+  .tone-auto-swatch {
+    height: 1.75rem; width: 1.75rem; border-radius: 999px;
+    background: conic-gradient(#6f5a9e, #b3705e, #3f7c74, #4f74b3, #6f5a9e);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / .3);
+  }
+
+  /* Creature stage in Settings: soft tone-tinted backdrop. */
+  .avatar-stage {
+    border-radius: 1rem;
+    background: radial-gradient(60% 50% at 50% 38%, color-mix(in oklab, var(--accent) 14%, transparent), transparent 72%);
+  }
+
+  /* Window dragging. Interactive children opt out. */
+  .titlebar { -webkit-app-region: drag; }
+  .titlebar :is(button, [role='combobox'], input, textarea, select, a, label, [role='radio']) { -webkit-app-region: no-drag; }
+  /* Room for inset traffic lights on macOS. No top padding: the control
+     cluster centers on the traffic-light line, not below it. */
+  .platform-mac .titlebar { padding-left: 78px; }
+
+  .message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

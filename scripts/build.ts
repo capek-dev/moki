@@ -8,6 +8,11 @@ async function bundle(options: Parameters<typeof Bun.build>[0]) {
 await mkdir('dist/electron', { recursive: true });
 await mkdir('dist/renderer', { recursive: true });
 await mkdir('dist/backend', { recursive: true });
+// Tailwind compiles the token layer, chrome styles, and companion animations
+// into the stylesheet index.html links. The renderer imports no CSS, so
+// Bun.build only emits JS.
+const tailwind = Bun.spawn([process.execPath, 'node_modules/@tailwindcss/cli/dist/index.mjs', '--input', 'src/renderer/tailwind.css', '--output', 'dist/renderer/app.css', '--minify'], { stdout: 'inherit', stderr: 'inherit' });
+if (await tailwind.exited !== 0) throw new Error('Tailwind build failed.');
 await bundle({ entrypoints: ['src/electron/main.ts', 'src/electron/preload.ts'], outdir: 'dist/electron', target: 'node', format: 'cjs', external: ['electron'], naming: '[name].cjs' });
 await bundle({ entrypoints: ['src/renderer/app.tsx'], outdir: 'dist/renderer', target: 'browser', minify: true, define: { 'process.env.NODE_ENV': JSON.stringify('production') } });
 await copyFile('src/renderer/index.html', 'dist/renderer/index.html');

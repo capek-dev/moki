@@ -26,6 +26,7 @@ export interface DesktopAPI {
   onProviders(listener: (state: ProviderState) => void): () => void;
   request(request: Request): Promise<Result>;
   openSettings(): Promise<void>;
+  openHistory(): Promise<void>;
   onState(listener: (result: Result) => void): () => void;
 }
 

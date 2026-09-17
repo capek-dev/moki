@@ -8,6 +8,7 @@ import type { ChatRequest, Request, Result } from '../shared/protocol';
 
 let window: BrowserWindow | undefined;
 let settings: BrowserWindow | undefined;
+let history: BrowserWindow | undefined;
 const registered = new Map<BrowserWindow, string>();
 const pendingChats = new Map<string, object>();
 function broadcast(result: Result) {
@@ -19,6 +20,11 @@ let runtime: Runtime | undefined;
 let providers: ProviderConnections | undefined;
 let quitting = false;
 let shutdownComplete = false;
+// macOS gets real window glass (vibrancy behind translucent panels); other
+// platforms fall back to a solid neutral page.
+const glassWindow = process.platform === 'darwin'
+  ? { vibrancy: 'under-window' as const, titleBarStyle: 'hiddenInset' as const, backgroundColor: '#00000000' }
+  : { backgroundColor: '#f4f4f6' };
 // Electron resolves this at runtime, including inside packaged app.asar.
 // Bun can inline __dirname as the original source directory during bundling.
 const appRoot = app.getAppPath();
@@ -40,16 +46,34 @@ async function openSettings() {
   if (settings) { settings.show(); settings.focus(); return; }
   settings = new BrowserWindow({
     width: 640, height: 720, minWidth: 400, minHeight: 500,
-    title: 'Povondra Settings', backgroundColor: '#faf7f2',
+    title: 'Povondra Settings',
     webPreferences: { preload: join(appRoot, 'dist/electron/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
+    ...glassWindow,
   });
   secureWindow(settings, '#settings');
   settings.on('close', (event) => { if (!quitting) { event.preventDefault(); settings?.hide(); } });
   settings.on('closed', () => { settings = undefined; });
   await settings.loadFile(page, { hash: 'settings' });
 }
+async function openHistory() {
+  if (quitting) return;
+  if (history) { history.show(); history.focus(); return; }
+  history = new BrowserWindow({
+    width: 380, height: 520, minWidth: 300, minHeight: 360,
+    title: 'Povondra History',
+    webPreferences: { preload: join(appRoot, 'dist/electron/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
+    ...glassWindow,
+  });
+  secureWindow(history, '#history');
+  // History is transient: closing it closes it, no hide-and-keep.
+  history.on('closed', () => { history = undefined; });
+  await history.loadFile(page, { hash: 'history' });
+}
 function showSettings() {
   void openSettings().catch((error) => dialog.showErrorBox('Could not open settings', String(error)));
+}
+function showHistory() {
+  void openHistory().catch((error) => dialog.showErrorBox('Could not open history', String(error)));
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -65,8 +89,9 @@ else {
     await runtime.ready;
     window = new BrowserWindow({
       width: 440, height: 680, minWidth: 360, minHeight: 480,
-      title: 'Povondra', backgroundColor: '#faf7f2',
+      title: 'Povondra',
       webPreferences: { preload: join(appRoot, 'dist/electron/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
+      ...glassWindow,
     });
     secureWindow(window);
     providers = new ProviderConnections(new EncryptedVault(join(app.getPath('userData'), 'providers.encrypted'), safeStorage), (url) => shell.openExternal(url), (state) => {
@@ -78,6 +103,7 @@ else {
       return providers!.handle(command);
     });
     ipcMain.handle('povondra:settings', (event) => { assertTrusted(event); return openSettings(); });
+    ipcMain.handle('povondra:history', (event) => { assertTrusted(event); return openHistory(); });
     ipcMain.handle('povondra:request', async (event, input: unknown) => {
       assertTrusted(event);
       // Explicit ingress allowlist blocks private credential-bearing pipe commands.
@@ -107,10 +133,11 @@ else {
     window.on('close', (event) => { if (!quitting) { event.preventDefault(); window?.hide(); } });
     // A text tray item works without shipping a placeholder binary image asset.
     tray = new Tray(nativeImage.createEmpty());
-    tray.setTitle('✿');
+    tray.setTitle('●');
     tray.setToolTip('Povondra');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open Povondra', click: show },
+      { label: 'History…', click: showHistory },
       { label: 'Settings…', click: showSettings },
       { label: 'Keep on top', type: 'checkbox', click: (item) => window?.setAlwaysOnTop(item.checked) },
       { type: 'separator' },
@@ -118,7 +145,7 @@ else {
     ]));
     tray.on('click', show);
     Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: 'Povondra', submenu: [{ label: 'Show Povondra', click: show }, { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings }, { role: 'quit' }] },
+      { label: 'Povondra', submenu: [{ label: 'Show Povondra', click: show }, { label: 'History…', accelerator: 'CmdOrCtrl+Y', click: showHistory }, { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings }, { role: 'quit' }] },
       { role: 'editMenu' },
       { role: 'windowMenu' },
     ]));
