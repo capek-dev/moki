@@ -13,7 +13,7 @@ export function codexFetch(access: string, accountId: string, fetcher: typeof fe
     const headers = new Headers(request.headers);
     headers.set('authorization', `Bearer ${access}`);
     headers.set('ChatGPT-Account-Id', accountId);
-    headers.set('originator', 'povondra');
+    headers.set('originator', 'moki');
     return fetcher('https://chatgpt.com/backend-api/codex/responses', {
       method: request.method, headers, body: await request.text(), signal: request.signal, redirect: 'error',
     });

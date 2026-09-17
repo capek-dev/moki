@@ -11,7 +11,7 @@ import type { Result } from '../src/shared/protocol';
 const credentials = { provider: 'deepseek' as const, key: 'test-secret' };
 function setup(generate: Generate) {
   const store = new Store(':memory:');
-  const id = store.handle({ method: 'createConversation', assistantId: 'povondra' }).conversationId!;
+  const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
   let finish!: () => void;
   const done = new Promise<void>((resolve) => { finish = resolve; });
   const events: Result[] = [];
@@ -24,7 +24,7 @@ test('streamed replies persist, carry attribution, and reuse role-based history'
   try {
     expect(f.send().snapshot.messages.at(-1)?.status).toBe('streaming');
     await f.done;
-    expect(f.store.messages(f.id).at(-1)).toMatchObject({ role: 'assistant', text: 'Hello there', status: 'complete', model: 'deepseek-v4-pro', assistantName: 'Povondra' });
+    expect(f.store.messages(f.id).at(-1)).toMatchObject({ role: 'assistant', text: 'Hello there', status: 'complete', model: 'deepseek-v4-pro', assistantName: 'Moki' });
     expect(turns[0].messages).toEqual([{ role: 'user', content: 'Hello' }]);
     f.send();
     await new Promise((r) => setTimeout(r, 5));
@@ -56,12 +56,12 @@ test('model/provider validation occurs before writes and settings changes do not
     expect(() => f.chat.start({ conversationId: f.id, text: 'x', model: 'gpt-5.4', credentials })).toThrow('supported model');
     expect(f.store.messages(f.id)).toHaveLength(0);
     f.send();
-    f.store.handle({ method: 'saveAssistant', assistant: { id: 'povondra', name: 'Changed', provider: 'codex', instructions: 'Different' } });
+    f.store.handle({ method: 'saveAssistant', assistant: { id: 'moki', name: 'Changed', provider: 'codex', instructions: 'Different' } });
     await new Promise((r) => setTimeout(r, 0));
     expect(turn?.provider).toBe('deepseek');
     expect(turn?.instructions).toBe('Be helpful, clear, and kind.');
     release(); await f.done;
-    expect(f.store.messages(f.id).at(-1)?.assistantName).toBe('Povondra');
+    expect(f.store.messages(f.id).at(-1)?.assistantName).toBe('Moki');
   } finally { release(); f.close(); }
 });
 test('provider errors retain partial text and never expose raw errors or retry', async () => {
@@ -75,7 +75,7 @@ test('provider errors retain partial text and never expose raw errors or retry',
   } finally { f.close(); }
 });
 test('additive migration preserves old notes; restart marks unfinished response interrupted', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-chat-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-chat-'));
   const path = join(dir, 'old.sqlite');
   const old = new Database(path);
   old.exec("CREATE TABLE assistants(id TEXT PRIMARY KEY,name TEXT,provider TEXT,instructions TEXT); CREATE TABLE conversations(id TEXT PRIMARY KEY,assistantId TEXT,title TEXT); CREATE TABLE messages(id TEXT PRIMARY KEY,conversationId TEXT,text TEXT); INSERT INTO assistants VALUES('povondra','Povondra','deepseek','Hi'); INSERT INTO conversations VALUES('c','povondra','Old note'); INSERT INTO messages VALUES('m','c','Saved before chat');");

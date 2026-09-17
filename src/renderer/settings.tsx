@@ -30,11 +30,11 @@ export function Settings() {
     setData(result.snapshot);
   }
   async function load() {
-    try { accept(await window.povondra.request({ method: 'snapshot' })); setError(''); }
+    try { accept(await window.moki.request({ method: 'snapshot' })); setError(''); }
     catch (e) { setError(String(e)); }
   }
   useEffect(() => {
-    const unsubscribe = window.povondra.onState(accept);
+    const unsubscribe = window.moki.onState(accept);
     void load();
     return unsubscribe;
   }, []);
@@ -53,7 +53,7 @@ export function Settings() {
             if (saving.current) return;
             saving.current = true; setBusy(true); setError('');
             try {
-              accept(await window.povondra.request({ method: 'saveAssistant', assistant: editing }));
+              accept(await window.moki.request({ method: 'saveAssistant', assistant: editing }));
               setEditing(undefined);
             } catch (e) { setError(String(e)); }
             finally { saving.current = false; setBusy(false); }

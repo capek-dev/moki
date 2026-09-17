@@ -37,7 +37,12 @@ export class Store {
       add('messages', 'error', 'TEXT');
       this.db.exec("UPDATE messages SET status = 'interrupted' WHERE status = 'streaming'");
     })();
-    this.db.query('INSERT OR IGNORE INTO assistants (id, name, provider, instructions) VALUES (?, ?, ?, ?)').run('povondra', 'Povondra', 'deepseek', 'Be helpful, clear, and kind.');
+    // Preserve legacy IDs and user edits, including conversation references.
+    this.db.transaction(() => {
+      this.db.query("UPDATE assistants SET name = 'Moki' WHERE id = 'povondra' AND name = 'Povondra'").run();
+      const legacy = this.db.query("SELECT id FROM assistants WHERE id = 'povondra'").get();
+      if (!legacy) this.db.query('INSERT OR IGNORE INTO assistants (id, name, provider, instructions) VALUES (?, ?, ?, ?)').run('moki', 'Moki', 'deepseek', 'Be helpful, clear, and kind.');
+    })();
   }
   conversation(id: string): Conversation {
     const value = this.db.query<Conversation, [string]>('SELECT * FROM conversations WHERE id = ?').get(text(id, 100));

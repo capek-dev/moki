@@ -12,15 +12,15 @@ test('preload strips Electron events and removes subscriptions', () => {
   const ipc = Object.assign(new EventEmitter(), { invoke: async (channel: string) => channel });
   let api: any;
   runInNewContext(readFileSync('dist/electron/preload.cjs', 'utf8'), {
-    require: () => ({ ipcRenderer: ipc, contextBridge: { exposeInMainWorld: (_name: string, value: unknown) => { api = value; } } }),
+    require: () => ({ ipcRenderer: ipc, contextBridge: { exposeInMainWorld: (name: string, value: unknown) => { expect(name).toBe('moki'); api = value; } } }),
   });
   const received: unknown[] = [];
   const unsubscribe = api.onState((...args: unknown[]) => received.push(args));
   const result = { revision: 3 };
-  ipc.emit('povondra:state', { privileged: true }, result);
+  ipc.emit('moki:state', { privileged: true }, result);
   expect(received).toEqual([[result]]);
   unsubscribe();
-  expect(ipc.listenerCount('povondra:state')).toBe(0);
+  expect(ipc.listenerCount('moki:state')).toBe(0);
 });
 
 // Execute the actual bundle with a private Electron/process harness. No global
@@ -61,6 +61,8 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
   const app = Object.assign(new EventEmitter(), {
     getAppPath: () => process.cwd(), requestSingleInstanceLock: () => true,
     whenReady: () => Promise.resolve(), getPath: () => '/unused', quit() {}, isPackaged: false,
+    setName(name: string) { expect(name).toBe('Moki'); },
+    setPath(key: string, value: string) { expect(key).toBe('userData'); expect(value).toBe('/unused/Moki'); },
   });
   class Tray extends EventEmitter { setTitle() {} setToolTip() {} setContextMenu() {} }
   const modules: Record<string, unknown> = {
@@ -70,7 +72,10 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
       dialog: { showErrorBox: (_title: string, message: string) => { throw new Error(message); } },
     },
     'node:path': path, 'node:url': url, 'node:readline': readline,
-    'node:crypto': nodeCrypto, 'node:fs': {}, 'node:http': {},
+    'node:crypto': nodeCrypto, 'node:fs': {
+      statSync() { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
+      mkdirSync(dir: string, options: unknown) { expect(dir).toBe('/unused/Moki'); expect(options).toEqual({ recursive: true, mode: 0o700 }); },
+    }, 'node:http': {},
     'node:child_process': { spawn: () => child },
   };
   runInNewContext(readFileSync('dist/electron/main.cjs', 'utf8'), {
@@ -82,11 +87,12 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
   child.stdout.write(JSON.stringify({ event: 'ready', bun: '1.4.0', capekExports: 1 }) + '\n');
   await new Promise((resolve) => setTimeout(resolve, 0));
   const event = (w: FakeWindow) => ({ sender: w.webContents, senderFrame: w.webContents.mainFrame });
-  const open = handlers.get('povondra:settings')!;
-  const request = handlers.get('povondra:request')!;
+  const open = handlers.get('moki:settings')!;
+  const request = handlers.get('moki:request')!;
   try {
     expect(windows).toHaveLength(1);
-    expect(() => handlers.get('povondra:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
+    expect(windows[0].options.title).toBe('Moki');
+    expect(() => handlers.get('moki:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
     await open(event(windows[0]));
     expect(windows).toHaveLength(2);
     await open(event(windows[0]));
@@ -97,9 +103,9 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
     const result = await request(event(windows[1]), { method: 'snapshot' });
     expect(result.revision).toBe(1);
     await expect(request(event(windows[0]), { method: 'startChat', credentials: { key: 'injected' } })).rejects.toThrow('Unsupported request');
-    await expect(handlers.get('povondra:chat')!({ sender: {}, senderFrame: {} }, {})).rejects.toThrow('Untrusted request');
-    await expect(handlers.get('povondra:chat')!(event(windows[0]), { conversationId: 'x', text: '', model: 'gpt-5.4' })).rejects.toThrow('Invalid chat request');
-    for (const w of windows) expect(w.webContents.sent.at(-1)).toEqual({ channel: 'povondra:state', result });
+    await expect(handlers.get('moki:chat')!({ sender: {}, senderFrame: {} }, {})).rejects.toThrow('Untrusted request');
+    await expect(handlers.get('moki:chat')!(event(windows[0]), { conversationId: 'x', text: '', model: 'gpt-5.4' })).rejects.toThrow('Invalid chat request');
+    for (const w of windows) expect(w.webContents.sent.at(-1)).toEqual({ channel: 'moki:state', result });
     expect(() => open({ sender: {}, senderFrame: {} })).toThrow('Untrusted request');
     await expect(request({ sender: windows[1].webContents, senderFrame: { url: windows[1].webContents.mainFrame.url } }, {})).rejects.toThrow('Untrusted request');
     let prevented = false;
@@ -111,9 +117,9 @@ test('settings is singleton, registered IPC broadcasts updates, and closing pres
     child.stdout.write(JSON.stringify({ event: 'state', result: { ...result, revision: 2 } }) + '\n');
     expect(windows[0].webContents.sent.at(-1).result.revision).toBe(2);
     child.emit('exit');
-    expect(windows[0].webContents.sent.at(-1).channel).toBe('povondra:runtime-error');
+    expect(windows[0].webContents.sent.at(-1).channel).toBe('moki:runtime-error');
     child.stdout.write(JSON.stringify({ event: 'state', result }) + '\n');
-    expect(windows[0].webContents.sent.at(-1).channel).toBe('povondra:runtime-error');
+    expect(windows[0].webContents.sent.at(-1).channel).toBe('moki:runtime-error');
   } finally {
     child.emit('exit'); child.stdout.end(); child.stderr.end(); child.stdin.end();
   }

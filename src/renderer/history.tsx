@@ -7,7 +7,7 @@ import { platformClass } from './platform';
 // Sessions live in their own window: picking one tells the chat window through
 // the storage event (same cross-window channel the tone uses), then closes.
 
-const OPEN_KEY = 'povondra:open-conversation';
+const OPEN_KEY = 'moki:open-conversation';
 
 export function History() {
   const [data, setData] = useState<Snapshot>();
@@ -19,8 +19,8 @@ export function History() {
     setData(result.snapshot);
   }
   useEffect(() => {
-    const unsubscribe = window.povondra.onState(accept);
-    void window.povondra.request({ method: 'snapshot' }).then(accept).catch(() => {});
+    const unsubscribe = window.moki.onState(accept);
+    void window.moki.request({ method: 'snapshot' }).then(accept).catch(() => {});
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') window.close(); };
     window.addEventListener('keydown', onKey);
     return () => { unsubscribe(); window.removeEventListener('keydown', onKey); };

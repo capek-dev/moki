@@ -18,8 +18,8 @@ export const TONES = {
 export type FixedTone = keyof typeof TONES;
 export type ToneChoice = 'auto' | FixedTone;
 export const DEFAULT_TONE: ToneChoice = 'auto';
-export const TONE_KEY = 'povondra:tone';
-export const PALETTE_KEY = 'povondra:palette';
+export const TONE_KEY = 'moki:tone';
+export const PALETTE_KEY = 'moki:palette';
 
 /** Each avatar palette maps to the tone that matches it. */
 const PALETTE_TONE: Record<Appearance['palette'], FixedTone> = {
@@ -32,14 +32,14 @@ const store = {
 };
 
 export function readToneChoice(): ToneChoice {
-  const value = store.get(TONE_KEY);
+  const value = store.get(TONE_KEY) ?? store.get('povondra:tone');
   return value === 'auto' || (value !== null && value in TONES) ? value as ToneChoice : DEFAULT_TONE;
 }
 
 /** The chat window records which companion palette is active so Settings can follow it. */
 export function rememberPalette(palette: Appearance['palette']) { store.set(PALETTE_KEY, palette); }
 export function activePalette(): Appearance['palette'] | undefined {
-  const value = store.get(PALETTE_KEY);
+  const value = store.get(PALETTE_KEY) ?? store.get('povondra:palette');
   return value !== null && value in PALETTE_TONE ? value as Appearance['palette'] : undefined;
 }
 

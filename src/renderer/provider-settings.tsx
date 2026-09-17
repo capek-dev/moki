@@ -25,12 +25,12 @@ export function ProviderSettings() {
   async function run(command: ProviderCommand) {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError('');
-    try { accept(await window.povondra.providers(command)); }
+    try { accept(await window.moki.providers(command)); }
     catch (e) { setError(e instanceof Error ? e.message : 'Connection failed.'); }
     finally { lock.current = false; setBusy(false); }
   }
   useEffect(() => {
-    const unsubscribe = window.povondra.onProviders(accept);
+    const unsubscribe = window.moki.onProviders(accept);
     void run({ action: 'status' });
     return unsubscribe;
   }, []);
@@ -61,9 +61,9 @@ export function ProviderSettings() {
         <Button variant="secondary" size="sm" disabled={busy || !state || state.signingIn} onClick={() => void run({ action: 'startCodex' })}>{state?.codex.connected ? 'Replace sign-in' : 'Sign in with ChatGPT'}</Button>
       </div>
       {state?.signingIn && <div className="grid gap-2 rounded-xl border border-accent-line bg-accent-soft p-3">
-        <p role="status" className="text-[12.5px] text-ink-2">Finish signing in in your browser. Povondra will connect automatically. This request expires after five minutes.</p>
+        <p role="status" className="text-[12.5px] text-ink-2">Finish signing in in your browser. Moki will connect automatically. This request expires after five minutes.</p>
         <div className="flex justify-end">
-          <Button variant="ghost" size="sm" onClick={() => void window.povondra.providers({ action: 'cancelCodex' }).then(accept).catch(() => setError('Could not cancel sign-in.'))}>Cancel sign-in</Button>
+          <Button variant="ghost" size="sm" onClick={() => void window.moki.providers({ action: 'cancelCodex' }).then(accept).catch(() => setError('Could not cancel sign-in.'))}>Cancel sign-in</Button>
         </div>
       </div>}
     </Panel>

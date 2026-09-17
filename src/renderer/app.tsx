@@ -20,7 +20,7 @@ const AUTO_THINKING = 'auto';
 function App() {
   const [state, setState] = useState<ChatState>({ revision: 0, histories: {} });
   const data = state.data;
-  const [assistantId, setAssistantId] = useState('povondra');
+  const [assistantId, setAssistantId] = useState('moki');
   const [conversationId, setConversationId] = useState<string>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -53,24 +53,26 @@ function App() {
   async function perform(request: Request): Promise<Result | undefined> {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError('');
-    try { const result = await window.povondra.request(request); accept(result); return result; }
+    try { const result = await window.moki.request(request); accept(result); return result; }
     catch (e) { setError(e instanceof Error ? e.message : 'Request failed.'); }
     finally { lock.current = false; setBusy(false); }
   }
   useEffect(() => {
-    const unsubscribe = window.povondra.onState(accept);
-    const unsubscribeError = window.povondra.onRuntimeError((message) => {
+    const unsubscribe = window.moki.onState(accept);
+    const unsubscribeError = window.moki.onRuntimeError((message) => {
       setError(message); setRuntimeFailed(true); setStarting(false);
       setState((previous) => ({ ...previous, data: previous.data && { ...previous.data, messages: previous.data.messages.map((m) => m.status === 'streaming' ? { ...m, status: 'interrupted' } : m) } }));
     });
     void perform({ method: 'snapshot' }).then((result) => {
-      setConversationId(result?.snapshot.conversations.find((item) => item.assistantId === 'povondra')?.id);
+      const initial = result?.snapshot.assistants[0];
+      if (initial) setAssistantId(initial.id);
+      setConversationId(result?.snapshot.conversations.find((item) => item.assistantId === initial?.id)?.id);
     });
     return () => { unsubscribe(); unsubscribeError(); };
   }, []);
   useEffect(() => {
     nearBottom.current = true;
-    if (conversationId) void window.povondra.request({ method: 'snapshot', conversationId }).then(accept).catch((e) => setError(String(e)));
+    if (conversationId) void window.moki.request({ method: 'snapshot', conversationId }).then(accept).catch((e) => setError(String(e)));
   }, [conversationId]);
   useEffect(() => { if (nearBottom.current) bottom.current?.scrollIntoView(); }, [conversationId, messages.at(-1)?.text, messages.length]);
   useEffect(() => { // Composer grows with the draft, up to a cap.
@@ -82,7 +84,7 @@ function App() {
   useEffect(() => {
     // Picking a session in the History window switches this conversation.
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== 'povondra:open-conversation') return;
+      if (event.key !== 'moki:open-conversation') return;
       try {
         const { id } = JSON.parse(event.newValue ?? '{}') as { id?: string };
         const picked = dataRef.current?.conversations.find((item) => item.id === id);
@@ -100,14 +102,14 @@ function App() {
     if (runtimeFailed || !draft.trim() || lock.current || running || !conversationId || !validModel || !loaded) return;
     lock.current = true; setBusy(true); setStarting(true); setError('');
     try {
-      accept(await window.povondra.chat({ conversationId, text: draft, model, thinking }));
+      accept(await window.moki.chat({ conversationId, text: draft, model, thinking }));
       setDrafts((current) => ({ ...current, [draftKey]: '' }));
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not send. Your draft is still here.'); }
     finally { lock.current = false; setBusy(false); setStarting(false); }
   }
   async function stop() {
     if (!conversationId) return;
-    try { accept(await window.povondra.request({ method: 'cancelChat', conversationId })); }
+    try { accept(await window.moki.request({ method: 'cancelChat', conversationId })); }
     catch (e) { setError(String(e)); }
   }
   async function newChat() {
@@ -131,8 +133,8 @@ function App() {
         </SelectContent>
       </Select>
       <Button variant="primary" size="round-sm" aria-label="New conversation" title="New conversation" disabled={busy || !data} onClick={() => void newChat()}><Plus className="h-3 w-3" strokeWidth={1.5} /></Button>
-      <Button variant="ghost" size="icon-sm" aria-label="History" title="History" disabled={busy} onClick={() => void window.povondra.openHistory().catch((e) => setError(String(e)))}><Clock /></Button>
-      <Button variant="ghost" size="icon-sm" aria-label="Settings" title="Settings" disabled={busy} onClick={() => void window.povondra.openSettings().catch((e) => setError(String(e)))}><Gear /></Button>
+      <Button variant="ghost" size="icon-sm" aria-label="History" title="History" disabled={busy} onClick={() => void window.moki.openHistory().catch((e) => setError(String(e)))}><Clock /></Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Settings" title="Settings" disabled={busy} onClick={() => void window.moki.openSettings().catch((e) => setError(String(e)))}><Gear /></Button>
     </header>
     {/* Presence zone: the avatar exists on its own, clear of the window-drag
         region and any nested controls, so it can later take click, hold, and

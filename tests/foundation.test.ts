@@ -5,10 +5,10 @@ import { join, resolve } from 'node:path';
 import { Store } from '../src/backend/store';
 import { Runtime } from '../src/electron/runtime';
 
-const binaryPath = resolve(process.env.POVONDRA_TEST_BINARY ?? 'dist/backend/povondra-runtime');
+const binaryPath = resolve(process.env.MOKI_TEST_BINARY ?? 'dist/backend/moki-runtime');
 
 function withStore(run: (store: Store, path: string) => void) {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-test-'));
   const path = join(dir, 'test.sqlite');
   const store = new Store(path);
   try { run(store, path); } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
@@ -23,7 +23,7 @@ test('profiles, conversations, and saved messages survive reopening', () => with
     expect(snapshot.assistants).toHaveLength(2);
     expect(snapshot.conversations[0]).toMatchObject({ assistantId: 'second', title: 'Remember this thought' });
     expect(snapshot.messages[0].text).toBe('Remember this thought');
-    expect(snapshot.conversations.filter((c) => c.assistantId === 'povondra')).toHaveLength(0);
+    expect(snapshot.conversations.filter((c) => c.assistantId === 'moki')).toHaveLength(0);
   } finally { reopened.close(); }
 }));
 test('unknown providers, malformed input and missing parents are rejected without writes', () => withStore((store) => {
@@ -34,16 +34,16 @@ test('unknown providers, malformed input and missing parents are rejected withou
   expect(store.snapshot().messages).toHaveLength(0);
 }));
 test('empty and oversized messages cannot change a conversation', () => withStore((store) => {
-  const { conversationId } = store.handle({ method: 'createConversation', assistantId: 'povondra' });
+  const { conversationId } = store.handle({ method: 'createConversation', assistantId: 'moki' });
   for (const text of ['', '   ', 'x'.repeat(16001)]) expect(() => store.handle({ method: 'saveMessage', conversationId, text })).toThrow();
   expect(store.snapshot().messages).toHaveLength(0);
 }));
 test('compiled Bun runtime works without PATH, imports Capek, persists SQLite and exits on EOF', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-binary-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-binary-'));
   try {
     const child = Bun.spawn([binaryPath], {
-      env: { PATH: '', POVONDRA_DATA_DIR: dir },
-      stdin: new Blob(['not json\n', JSON.stringify({ id: '1', request: { method: 'createConversation', assistantId: 'povondra' } }) + '\n']),
+      env: { PATH: '', MOKI_DATA_DIR: dir },
+      stdin: new Blob(['not json\n', JSON.stringify({ id: '1', request: { method: 'createConversation', assistantId: 'moki' } }) + '\n']),
       stdout: 'pipe', stderr: 'pipe',
     });
     const timer = setTimeout(() => child.kill(), 10000);
@@ -59,12 +59,12 @@ test('compiled Bun runtime works without PATH, imports Capek, persists SQLite an
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 15000);
 test('Electron-side runtime bridge correlates requests and closes its child', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-bridge-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-bridge-'));
   const runtime = new Runtime(binaryPath, dir);
   try {
     await runtime.ready;
-    const results = await Promise.all([runtime.request({ method: 'snapshot' }), runtime.request({ method: 'createConversation', assistantId: 'povondra' })]);
-    expect(results[0].snapshot.assistants[0].name).toBe('Povondra');
+    const results = await Promise.all([runtime.request({ method: 'snapshot' }), runtime.request({ method: 'createConversation', assistantId: 'moki' })]);
+    expect(results[0].snapshot.assistants[0].name).toBe('Moki');
     expect(results[1].conversationId).toBeString();
   } finally { await runtime.close(); rmSync(dir, { recursive: true, force: true }); }
 }, 15000);

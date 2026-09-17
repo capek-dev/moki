@@ -1,4 +1,4 @@
-# Povondra
+# Moki
 
 A macOS-first, minimal desktop assistant built with Electron, React, and a bundled Bun 1.4.0 runtime using Čapek.
 
@@ -39,13 +39,19 @@ bun run package:dir
 
 The tests require a preceding build. They exercise only the foundation: validation, SQLite persistence, compiled runtime startup with an empty PATH, Čapek import, pipe requests, and shutdown. They do not open Electron windows or call model providers.
 
-On Apple Silicon, the local package is `release/mac-arm64/Povondra.app`. To test the actual bundled backend:
+On Apple Silicon, the local package is `release/mac-arm64/Moki.app`. To test the actual bundled backend:
 
 ```sh
-POVONDRA_TEST_BINARY="release/mac-arm64/Povondra.app/Contents/Resources/backend/povondra-runtime" bun run test:foundation
+MOKI_TEST_BINARY="release/mac-arm64/Moki.app/Contents/Resources/backend/moki-runtime" bun run test:foundation
 ```
 
 Builds target the current machine's architecture. Cross-architecture packaging is not supported by this script yet. Local builds refresh the compiled Bun executable's ad-hoc signature. The outer app is unsigned, uses the default Electron icon, and is **not ready for public distribution**. Developer ID signing, hardened-runtime verification, notarization, and Intel verification remain release work.
+
+## Rename compatibility
+
+The checkout directory is unchanged. New installs use the `Moki` Electron profile and `moki.sqlite`. Existing `Povondra`/`povondra` profiles and `povondra.sqlite` are reused in place, without copying or deleting data. Ambiguous profiles/databases stop startup rather than choosing a history silently. Existing companion IDs, customized names, avatars, and historical message attribution remain intact; the old default companion display name becomes Moki. Saved appearance preferences fall back to the legacy keys. Encrypted provider files are retained, but macOS Keychain access under the new application identity needs native verification.
+
+The backend now requires `MOKI_DATA_DIR`. Rebuild before launching; existing release artifacts are not renamed in place.
 
 ## Layout
 

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "povondra",
+      "name": "moki",
       "dependencies": {
         "@capekai/core": "1.0.13",
         "@radix-ui/react-select": "^2.3.7",

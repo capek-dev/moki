@@ -1,5 +1,5 @@
 {
-  "name": "povondra",
+  "name": "moki",
   "version": "0.1.0",
   "private": true,
   "description": "A quiet desktop assistant for everyday computer work",
@@ -37,16 +37,16 @@
   },
   "trustedDependencies": ["electron"],
   "build": {
-    "appId": "app.povondra.desktop",
-    "productName": "Povondra",
+    "appId": "app.moki.desktop",
+    "productName": "Moki",
     "asar": true,
     "directories": {
       "output": "release"
     },
     "files": ["dist/electron/**", "dist/renderer/**", "package.json"],
     "extraResources": [{
-      "from": "dist/backend/povondra-runtime",
-      "to": "backend/povondra-runtime"
+      "from": "dist/backend/moki-runtime",
+      "to": "backend/moki-runtime"
     }],
     "mac": {
       "category": "public.app-category.productivity",

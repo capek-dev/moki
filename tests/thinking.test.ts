@@ -14,11 +14,11 @@ test('thinking levels are model-specific; malformed and unsupported levels rejec
   for (const value of ['max', 'off', '', {}, 1]) expect(() => requireThinking('codex', 'gpt-5.4', value)).toThrow();
 });
 test('thinking persists per conversation, defaults on model change and survives restart', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-thinking-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-thinking-'));
   const path = join(dir, 'test.sqlite');
   let store = new Store(path);
   try {
-    const id = store.handle({ method: 'createConversation', assistantId: 'povondra' }).conversationId!;
+    const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
     expect(store.conversation(id).thinking).toBeNull();
     store.handle({ method: 'selectModel', conversationId: id, model: 'deepseek-v4-pro', thinking: 'max' });
     store.close(); store = new Store(path);
@@ -31,7 +31,7 @@ test('thinking persists per conversation, defaults on model change and survives 
 });
 test('turn thinking is pinned and attributed despite subsequent setting changes', async () => {
   const store = new Store(':memory:');
-  const id = store.handle({ method: 'createConversation', assistantId: 'povondra' }).conversationId!;
+  const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
   let turn: Turn | undefined;
   const chat = new Chat(store, async function* (value) { turn = value; yield 'ok'; }, () => {});
   try {

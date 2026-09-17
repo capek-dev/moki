@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TonePicker } from '../src/renderer/tone-picker';
-import { TONES, applyTone, readToneChoice, resolveTone, type FixedTone } from '../src/renderer/tone';
+import { TONES, TONE_KEY, PALETTE_KEY, activePalette, applyTone, readToneChoice, resolveTone, type FixedTone } from '../src/renderer/tone';
 import type { Appearance } from '../src/shared/appearance';
 
 test('tone catalog has distinct names and light/dark variants for every tone', () => {
@@ -23,6 +23,24 @@ test('auto tone follows the avatar palette; every palette maps to its matching t
   // No localStorage in the test host: auto falls back to the default palette, never throws.
   expect(resolveTone('auto')).toBe('lavender');
   expect(readToneChoice()).toBe('auto');
+});
+
+test('legacy tone preferences remain readable and Moki keys take precedence', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map([['povondra:tone', 'ocean'], ['povondra:palette', 'mint']]);
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key: string) => values.get(key) ?? null } });
+  try {
+    expect(TONE_KEY).toBe('moki:tone');
+    expect(PALETTE_KEY).toBe('moki:palette');
+    expect(readToneChoice()).toBe('ocean');
+    expect(activePalette()).toBe('mint');
+    values.set(TONE_KEY, 'rose'); values.set(PALETTE_KEY, 'sky');
+    expect(readToneChoice()).toBe('rose');
+    expect(activePalette()).toBe('sky');
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
 });
 
 test('applyTone writes the runtime tone variables', () => {

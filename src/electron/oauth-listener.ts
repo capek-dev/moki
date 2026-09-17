@@ -13,9 +13,9 @@ export function callbackHandler(complete: (url: string) => Promise<void>): Reque
       response.writeHead(400); response.end('Invalid sign-in callback.'); return;
     }
     void complete(`http://localhost:1455${request.url}`).then(() => {
-      response.end('Signed in to Povondra. You can close this tab and return to the app.');
+      response.end('Signed in to Moki. You can close this tab and return to the app.');
     }, () => {
-      response.writeHead(400); response.end('Sign-in could not be completed. Return to Povondra and try again.');
+      response.writeHead(400); response.end('Sign-in could not be completed. Return to Moki and try again.');
     });
   };
 }

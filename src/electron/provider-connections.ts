@@ -79,7 +79,7 @@ export class ProviderConnections {
         const flow = this.flow = { state, verifier, expires: this.now() + 300000, used: false };
         const loginGeneration = this.generation.codex;
         const url = new URL('https://auth.openai.com/oauth/authorize');
-        url.search = new URLSearchParams({ response_type: 'code', client_id: CLIENT, redirect_uri: REDIRECT, scope: 'openid profile email offline_access', state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', id_token_add_organizations: 'true', codex_cli_simplified_flow: 'true', originator: 'povondra' }).toString();
+        url.search = new URLSearchParams({ response_type: 'code', client_id: CLIENT, redirect_uri: REDIRECT, scope: 'openid profile email offline_access', state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', id_token_add_organizations: 'true', codex_cli_simplified_flow: 'true', originator: 'moki' }).toString();
         try {
           const stop = await this.listen(async (callback) => {
             if (this.flow !== flow) throw new Error('Sign-in is no longer active.');

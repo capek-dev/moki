@@ -10,7 +10,7 @@ import { applyResult } from '../src/renderer/chat-state';
 const assistant = { id: 'work', name: 'Work', provider: 'codex', instructions: 'Be concise.' };
 const appearance = { ...INITIAL_APPEARANCE, outfit: 'suit' as const, palette: 'sky' as const, accessory: 'glasses' as const };
 test('avatars persist independently and omitted appearance preserves existing choices', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-avatar-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-avatar-'));
   const path = join(dir, 'test.sqlite');
   let store = new Store(path);
   try {
@@ -39,7 +39,7 @@ test('invalid appearance rejects the whole assistant edit without overwriting sa
   } finally { store.close(); }
 });
 test('legacy assistant migration supplies default avatar without losing existing fields', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-avatar-legacy-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-avatar-legacy-'));
   const path = join(dir, 'test.sqlite');
   const old = new Database(path);
   old.exec("CREATE TABLE assistants (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, instructions TEXT NOT NULL); INSERT INTO assistants VALUES ('povondra', 'My assistant', 'codex', 'Keep this');");

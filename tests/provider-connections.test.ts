@@ -90,7 +90,7 @@ test('failed replacement preserves previous subscription and sanitizes errors', 
   expect(f.saved().codex?.access).toBe('secret-access');
 });
 test('vault delegates encryption, uses private permissions, and preserves corrupt bytes', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'povondra-vault-'));
+  const dir = mkdtempSync(join(tmpdir(), 'moki-vault-'));
   const file = join(dir, 'vault');
   let plaintext = '';
   const encryption = { isEncryptionAvailable: () => true, encryptString: (value: string) => { plaintext = value; return Buffer.from('encrypted-test-fixture'); }, decryptString: (bytes: Buffer) => { if (bytes.toString() !== 'encrypted-test-fixture') throw new Error(); return plaintext; } };

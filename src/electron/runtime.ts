@@ -13,7 +13,7 @@ export class Runtime {
     this.child = spawn(executable, [], {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, POVONDRA_DATA_DIR: dataDir },
+      env: { ...process.env, MOKI_DATA_DIR: dataDir },
     });
     this.ready = new Promise((resolve, reject) => {
       const timer = setTimeout(() => { reject(new Error('Runtime startup timed out.')); this.child.kill(); }, 15000);
@@ -21,14 +21,14 @@ export class Runtime {
         clearTimeout(timer);
         const wasStopped = this.stopped;
         this.stopped = true;
-        if (!wasStopped) this.failed('The chat runtime stopped. Quit and reopen Povondra to reconnect.');
+        if (!wasStopped) this.failed('The chat runtime stopped. Quit and reopen Moki to reconnect.');
         reject(error);
         for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(error); }
         this.pending.clear();
       };
       this.child.on('error', fail);
       this.child.stdin.on('error', (error) => { fail(error); this.child.kill(); });
-      this.child.on('exit', () => fail(new Error('Runtime stopped. Reopen Povondra to reconnect.')));
+      this.child.on('exit', () => fail(new Error('Runtime stopped. Reopen Moki to reconnect.')));
       const lines = createInterface({ input: this.child.stdout });
       lines.on('line', (line) => {
         if (this.stopped) return;

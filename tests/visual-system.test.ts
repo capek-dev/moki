@@ -19,7 +19,7 @@ test('renderer bundle carries the tone system, companions and the history window
   expect(js).toContain('creature');
   expect(js).toContain('Settings');
   expect(js).toContain('History');
-  expect(js).toContain('povondra:open-conversation');
+  expect(js).toContain('moki:open-conversation');
   const css = readFileSync('dist/renderer/app.css', 'utf8');
   // Page and surfaces derive from the accent so the tone tints the whole app.
   expect(css).toContain('color-mix(in oklab, var(--accent)');

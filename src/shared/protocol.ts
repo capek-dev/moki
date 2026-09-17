@@ -30,4 +30,4 @@ export interface DesktopAPI {
   onState(listener: (result: Result) => void): () => void;
 }
 
-declare global { interface Window { povondra: DesktopAPI } }
+declare global { interface Window { moki: DesktopAPI } }
