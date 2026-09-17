@@ -162,8 +162,9 @@ else {
     ipcMain.handle('moki:request', async (event, input: unknown) => {
       assertTrusted(event);
       // Explicit ingress allowlist blocks private credential-bearing pipe commands.
-      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat', 'revertMessage'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
+      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat', 'revertMessage', 'cuaTools', 'cuaSetTool', 'cuaSetEnabled'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
       const request = input as Request;
+      if ((request.method === 'cuaTools' || request.method === 'cuaSetTool' || request.method === 'cuaSetEnabled') && event.sender !== settings?.webContents) throw new Error('Cua settings are only available in Settings.');
       if (request.method === 'cancelChat') pendingChats.delete(request.conversationId);
       return broadcast(await runtime!.request(request));
     });

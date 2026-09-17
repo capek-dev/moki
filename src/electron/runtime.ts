@@ -47,8 +47,10 @@ export class Runtime {
         } catch { fail(new Error('Invalid runtime response.')); this.child.kill(); }
       });
     });
-    // Drain stderr without exposing internal output or future credentials to the renderer.
-    this.child.stderr.resume();
+    // Backend diagnostics go to the host terminal (visible under `bun run
+    // desktop` and `dev`); the renderer never sees stderr. All backend logging
+    // uses console.error so the stdout JSON-line protocol stays clean.
+    createInterface({ input: this.child.stderr }).on('line', (line) => { if (line.trim()) process.stderr.write(line + '\n'); });
   }
   startChat(request: ChatRequest, credentials: Credentials): Promise<Result> {
     return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials });

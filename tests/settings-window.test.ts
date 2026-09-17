@@ -105,6 +105,9 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(menu.some((item) => item.label === 'Developer')).toBe(development);
     expect(windows[0].webContents.devTools).toBe(development ? 1 : 0);
     expect(() => handlers.get('moki:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
+    await expect(request(event(windows[0]), { method: 'cuaTools' })).rejects.toThrow('only available in Settings');
+    await expect(request(event(windows[0]), { method: 'cuaSetTool', tool: 'click', disabled: true })).rejects.toThrow('only available in Settings');
+    await expect(request(event(windows[0]), { method: 'cuaSetEnabled', enabled: false })).rejects.toThrow('only available in Settings');
     await open(event(windows[0]));
     expect(windows).toHaveLength(2);
     await open(event(windows[0]));
@@ -126,6 +129,8 @@ test.each([{ development: false, packaged: false }, { development: true, package
     }
     const result = await request(event(windows[1]), { method: 'snapshot' });
     expect(result.revision).toBe(1);
+    expect((await request(event(windows[1]), { method: 'cuaTools' })).revision).toBe(1);
+    expect((await request(event(windows[1]), { method: 'cuaSetEnabled', enabled: false })).revision).toBe(1);
     await expect(request(event(windows[0]), { method: 'startChat', credentials: { key: 'injected' } })).rejects.toThrow('Unsupported request');
     await expect(handlers.get('moki:chat')!({ sender: {}, senderFrame: {} }, {})).rejects.toThrow('Untrusted request');
     await expect(handlers.get('moki:chat')!(event(windows[0]), { conversationId: 'x', text: '', model: 'gpt-5.4' })).rejects.toThrow('Invalid chat request');

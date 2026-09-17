@@ -1,9 +1,14 @@
-import { streamText } from 'ai';
+import { jsonSchema, stepCountIs, streamText, tool } from 'ai';
 import { createOpenAiResponsesModel } from '@capekai/core/providers';
 import { getModelWithMetadata } from '@capekai/core/execution';
 import { createSingleModelConfiguration, withRuntimeConfiguration } from '@capekai/core/configuration';
-import type { Generate } from '@backend/chat';
+import { describeError, type Generate } from '@backend/chat';
 import { requireThinking } from '@shared/models';
+
+// Multi-step tool loop budget. The AI SDK has no unlimited mode (omitting
+// stopWhen defaults to a single step), so the maximum expressible cap is used;
+// the reply deadline is what actually terminates runaway loops.
+const TOOL_STEP_BUDGET = Number.MAX_SAFE_INTEGER;
 
 export function codexFetch(access: string, accountId: string, fetcher: typeof fetch = fetch): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -37,20 +42,40 @@ export function createGenerate(fetcher: typeof fetch = fetch): Generate {
     };
   }
   signal.throwIfAborted();
+  // Enabled Cua tools run inline with the reply; the step bound keeps a
+  // tool-looping model from running away past the reply deadline.
+  const modelTools = turn.tools && turn.tools.length
+    ? Object.fromEntries(turn.tools.map((entry) => [entry.name, tool({
+        description: entry.description || entry.name,
+        inputSchema: jsonSchema(entry.inputSchema as Parameters<typeof jsonSchema>[0]),
+        execute: (args: unknown) => entry.execute(args),
+      })]))
+    : undefined;
   const stream = streamText({
     model: metadata.model,
     ...(metadata.useProviderInstructions ? {} : { system: turn.instructions || 'Be helpful, clear, and kind.' }),
     messages: turn.messages,
+    tools: modelTools,
+    stopWhen: modelTools ? stepCountIs(TOOL_STEP_BUDGET) : undefined,
     providerOptions: providerOptions as Parameters<typeof streamText>[0]['providerOptions'],
     abortSignal: signal,
     maxRetries: 0,
     // No temperature/max-output keys: Codex rejects some shared parameters.
-    // No tools are supplied. Reasoning is consumed but not displayed or stored.
+    // Reasoning is consumed but not displayed or stored.
     onError: () => {},
   });
   for await (const event of stream.fullStream) {
-    if (event.type === 'error') throw event.error;
-    if (event.type === 'finish' && event.finishReason !== 'stop') throw new Error('Model did not complete its reply.');
+    // Terminal diagnostics only; the renderer keeps its generic messages.
+    if (event.type === 'error') {
+      console.error(`[moki] model stream error provider=${turn.provider} model=${turn.model}: ${describeError(event.error)}`);
+      throw event.error;
+    }
+    if (event.type === 'finish' && event.finishReason !== 'stop') {
+      // 'tool-calls' means the step budget ended the turn while the model
+      // still wanted more tools; partial text stands. Log other reasons.
+      console.error(`[moki] model stream ended early reason=${event.finishReason}${event.finishReason === 'tool-calls' ? ` (step budget ${TOOL_STEP_BUDGET} reached)` : ''} provider=${turn.provider} model=${turn.model}`);
+      if (event.finishReason !== 'tool-calls') throw new Error('Model did not complete its reply.');
+    }
     if (event.type === 'text-delta') yield event.text;
   }
   };

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { AttachmentDraft, Message, Request, Result } from '@shared/protocol';
 import { MODELS, defaultModel, supportsImageInput, thinkingLevels, type Thinking } from '@shared/models';
+import { estimateContextUsage } from '@shared/context';
 import { AttachmentImage } from '@renderer/components/chat/attachment-image';
 import { applyResult, type ChatState } from '@renderer/lib/chat-state';
 import { Companion, INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
 import { ChatCompanion } from '@renderer/components/companion/chat-companion';
 import { Answer } from '@renderer/components/chat/answer';
+import { ContextRing } from '@renderer/components/chat/context-ring';
 import { useTone, rememberPalette } from '@renderer/lib/tone';
 import { platformClass } from '@renderer/lib/platform';
 import { Button } from '@renderer/components/ui/button';
@@ -15,6 +17,32 @@ import { Banner } from '@renderer/components/ui/panel';
 import { ArrowUp, Capture, Clock, Gear, Pencil, Plus, Stop, Undo, Zap } from '@renderer/components/ui/icons';
 
 const AUTO_THINKING = 'auto';
+
+// Quiet tool trail: one friendly "doing now" line while a tool runs, a
+// collapsed summary afterwards. No sprawling per-call cards.
+function ToolTrail({ message }: { message: Message }) {
+  const calls = message.toolCalls ?? [];
+  if (!calls.length) return null;
+  const latest = calls.at(-1)!;
+  if (message.status === 'streaming' && latest.status === 'running') {
+    return <p className="flex items-center gap-1.5 text-[12.5px] text-ink-3" role="status">
+      <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" aria-hidden="true" />
+      <span className="truncate">{latest.label}{latest.detail ? ` · ${latest.detail}` : ''}…</span>
+    </p>;
+  }
+  return <details className="group/details">
+    <summary className="flex w-fit cursor-pointer select-none list-none items-center gap-1 text-[11.5px] text-ink-3 transition-colors hover:text-ink-2">
+      <span className="transition-transform group-open/details:rotate-90" aria-hidden="true">▸</span>
+      Used {calls.length} tool{calls.length === 1 ? '' : 's'}
+    </summary>
+    <ul className="mt-1 grid gap-0.5 border-l border-line pl-2.5">
+      {calls.map((call, index) => <li key={index} className="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-snug text-ink-3">
+        <span className={`h-1.5 w-1.5 shrink-0 translate-y-[-1px] self-center rounded-full ${call.status === 'failed' ? 'bg-danger' : call.status === 'running' ? 'bg-ink-3/60' : 'bg-ok'}`} aria-hidden="true" />
+        <span className="min-w-0 truncate">{call.label}{call.detail ? <span className="text-ink-3/70"> · {call.detail}</span> : null}</span>
+      </li>)}
+    </ul>
+  </details>;
+}
 
 export function App() {
   const [state, setState] = useState<ChatState>({ revision: 0, histories: {} });
@@ -46,6 +74,13 @@ export function App() {
   const models = MODELS.filter((item) => item.provider === assistant?.provider);
   const model = conversation?.model ?? (assistant ? defaultModel(assistant.provider) : '');
   const validModel = models.some((item) => item.id === model);
+  const contextModel = validModel ? MODELS.find((item) => item.id === model && item.provider === assistant?.provider) : undefined;
+  // Same bounds the backend history() applies, so the ring reflects what the
+  // next turn will actually send rather than raw transcript size.
+  const contextEstimate = useMemo(
+    () => estimateContextUsage(messages, data?.attachments ?? [], assistant?.instructions ?? ''),
+    [messages, data?.attachments, assistant?.instructions],
+  );
   const imageCapable = validModel && assistant ? supportsImageInput(assistant.provider, model) : false;
   const levels = validModel && assistant ? thinkingLevels(assistant.provider, model) : [];
   const thinking = conversation?.thinking ?? null;
@@ -187,6 +222,7 @@ export function App() {
     {/* The Moki label remains draggable; only the action buttons opt out. */}
     <header className="titlebar flex min-h-12 items-center justify-end gap-1 pr-2.5 pb-2">
       <span className="px-2 text-[12.5px] font-medium text-ink-2">Moki</span>
+      {contextModel && <ContextRing estimate={contextEstimate} contextWindow={contextModel.contextWindow} modelName={contextModel.name} />}
       <Button variant="ghost" size="icon-sm" aria-label="New conversation" title="New conversation" disabled={busy || capturing || !assistant} onClick={() => void newChat()}><Plus /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="History" title="History" disabled={busy || capturing} onClick={() => void window.moki.openHistory().catch((e) => setError(String(e)))}><Clock /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="Settings" title="Settings" disabled={busy || capturing} onClick={() => void window.moki.openSettings().catch((e) => setError(String(e)))}><Gear /></Button>
@@ -216,6 +252,7 @@ export function App() {
             <span className="mt-0.5 w-5 shrink-0">{message.status === 'streaming' ? <ChatCompanion appearance={replyAppearance} messages={[message]} starting={false} failed={false} /> : <Companion appearance={replyAppearance} paused />}</span>
             <div className="grid min-w-0 flex-1 gap-1.5 self-start">
               {earlier && message.assistantName && <p className="text-[11px] text-ink-3">{message.assistantName}</p>}
+              <ToolTrail message={message} />
               {message.text
                 ? <Answer text={message.text} />
                 : message.status === 'streaming' && <p className="text-[13.5px] text-ink-3">Thinking…</p>}

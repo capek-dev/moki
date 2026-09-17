@@ -3,12 +3,19 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { join } from 'node:path';
 import { storedAppearance, validateAppearance } from '@shared/appearance';
 import { attachmentDirectories, requireAttachmentId, validatePng } from '@shared/attachments';
-import type { Assistant, Attachment, Conversation, Message, Result, Snapshot } from '@shared/protocol';
+import type { Assistant, Attachment, Conversation, Message, Result, Snapshot, ToolCallRecord } from '@shared/protocol';
 import { defaultModel, requireModel, requireThinking, supportsImageInput, type Thinking } from '@shared/models';
 
 type AssistantRow = Omit<Assistant, 'appearance'> & { appearance: string | null };
 type AttachmentRow = Attachment & { storageName: string };
+// toolCalls is stored as a JSON string; rows decode into the wire shape.
+type MessageRow = Omit<Message, 'toolCalls'> & { toolCalls: string | null };
 function decodeAssistant(row: AssistantRow): Assistant { return { ...row, appearance: storedAppearance(row.appearance) }; }
+function decodeMessage(row: MessageRow): Message {
+  if (row.toolCalls === null || row.toolCalls === undefined) return { ...row, toolCalls: undefined };
+  try { const parsed = JSON.parse(row.toolCalls); return { ...row, toolCalls: Array.isArray(parsed) ? parsed : undefined }; }
+  catch { return { ...row, toolCalls: undefined }; }
+}
 
 export function text(value: unknown, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error('Invalid text value.');
@@ -32,7 +39,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS assistants (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, instructions TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, assistantId TEXT NOT NULL REFERENCES assistants(id), title TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, conversationId TEXT NOT NULL REFERENCES conversations(id), text TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, messageId TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, mime TEXT NOT NULL, byteSize INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, storageName TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, messageId TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, mime TEXT NOT NULL, byteSize INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, storageName TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS cua_disabled_tools (name TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS cua_integration (id INTEGER PRIMARY KEY CHECK (id = 0), enabled INTEGER NOT NULL);
+      INSERT OR IGNORE INTO cua_integration (id, enabled) VALUES (0, 1);`);
     this.db.transaction(() => {
       const add = (table: string, name: string, definition: string) => {
         const columns = this.db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
@@ -47,6 +57,7 @@ export class Store {
       add('messages', 'model', 'TEXT');
       add('messages', 'assistantName', 'TEXT');
       add('messages', 'error', 'TEXT');
+      add('messages', 'toolCalls', 'TEXT');
       this.db.exec("UPDATE messages SET status = 'interrupted' WHERE status = 'streaming'");
     })();
     // Preserve legacy IDs and user edits, including conversation references.
@@ -69,16 +80,36 @@ export class Store {
     return decodeAssistant(this.db.query<AssistantRow, [string]>('SELECT * FROM assistants WHERE id = ?').get(this.conversation(id).assistantId)!);
   }
   messages(id: string): Message[] {
-    return this.db.query<Message, [string]>('SELECT * FROM (SELECT rowid AS sequence, * FROM messages WHERE conversationId = ? ORDER BY rowid DESC LIMIT 100) ORDER BY sequence').all(id);
+    return this.db.query<MessageRow, [string]>('SELECT * FROM (SELECT rowid AS sequence, * FROM messages WHERE conversationId = ? ORDER BY rowid DESC LIMIT 100) ORDER BY sequence').all(id).map(decodeMessage);
   }
   attachmentsFor(messages: readonly Message[]): Attachment[] {
     if (!messages.length) return [];
     const placeholders = messages.map(() => '?').join(',');
     return this.db.query<Attachment, string[]>(`SELECT id, messageId, mime, byteSize, width, height FROM attachments WHERE messageId IN (${placeholders}) ORDER BY rowid`).all(...messages.map((message) => message.id));
   }
+  // Single-row master switch: while off, Moki never contacts the driver and
+  // the agent receives none of its tools. Per-tool filters are kept for reuse.
+  cuaIntegrationEnabled(): boolean {
+    return this.db.query<{ enabled: number }, []>('SELECT enabled FROM cua_integration WHERE id = 0').get()?.enabled === 1;
+  }
+  setCuaIntegrationEnabled(enabled: boolean) {
+    this.db.query('INSERT INTO cua_integration (id, enabled) VALUES (0, ?) ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled').run(enabled ? 1 : 0);
+  }
+  cuaDisabledTools(): string[] {
+    return this.db.query<{ name: string }, []>('SELECT name FROM cua_disabled_tools ORDER BY name').all().map((row) => row.name);
+  }
+  setCuaToolDisabled(name: string, disabled: boolean) {
+    if (disabled) this.db.query('INSERT OR IGNORE INTO cua_disabled_tools (name) VALUES (?)').run(name);
+    else this.db.query('DELETE FROM cua_disabled_tools WHERE name = ?').run(name);
+  }
+  pruneCuaDisabledTools(known: readonly string[]) {
+    const keep = new Set(known);
+    const stale = this.db.query<{ name: string }, []>('SELECT name FROM cua_disabled_tools').all().filter((row) => !keep.has(row.name)).map((row) => row.name);
+    if (stale.length) this.db.query(`DELETE FROM cua_disabled_tools WHERE name IN (${stale.map(() => '?').join(',')})`).run(...stale);
+  }
   snapshot(conversationId?: string): Snapshot {
     // History reads are bounded. Older messages and their attachments remain on disk.
-    const messages = conversationId ? this.messages(conversationId) : this.db.query<Message, []>('SELECT * FROM (SELECT rowid AS sequence, * FROM messages ORDER BY rowid DESC LIMIT 100) ORDER BY sequence').all();
+    const messages = conversationId ? this.messages(conversationId) : this.db.query<MessageRow, []>('SELECT * FROM (SELECT rowid AS sequence, * FROM messages ORDER BY rowid DESC LIMIT 100) ORDER BY sequence').all().map(decodeMessage);
     return {
       assistants: this.db.query<AssistantRow, []>('SELECT * FROM assistants ORDER BY rowid').all().map(decodeAssistant),
       conversations: this.db.query<Conversation, []>('SELECT * FROM conversations ORDER BY rowid DESC LIMIT 100').all(),
@@ -165,8 +196,9 @@ export class Store {
     this.removeAttachmentFiles(files);
     return { messageId, assistant };
   }
-  updateReply(id: string, body: string, status: Message['status'], error: string | null = null) {
-    this.db.query('UPDATE messages SET text = ?, status = ?, error = ? WHERE id = ?').run(body, status, error, id);
+  updateReply(id: string, body: string, status: Message['status'], error: string | null = null, toolCalls?: readonly ToolCallRecord[]) {
+    if (toolCalls) this.db.query('UPDATE messages SET text = ?, status = ?, error = ?, toolCalls = ? WHERE id = ?').run(body, status, error, JSON.stringify(toolCalls), id);
+    else this.db.query('UPDATE messages SET text = ?, status = ?, error = ? WHERE id = ?').run(body, status, error, id);
   }
   attachmentBytes(id: string): Uint8Array {
     if (!this.attachmentDirs) throw new Error('Attachment storage is unavailable.');

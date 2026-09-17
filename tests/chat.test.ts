@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '@backend/store';
 import { Chat, history, type Generate, type Turn } from '@backend/chat';
+import type { Toolbag } from '@backend/cua';
 import { applyResult } from '@renderer/lib/chat-state';
 import type { Attachment, Message, Result } from '@shared/protocol';
 
@@ -46,6 +47,55 @@ test('duplicate send rejected; cancellation saves partial and ignores late provi
     expect(f.store.messages(f.id)).toHaveLength(2);
     expect(f.store.messages(f.id).at(-1)?.text).toBe('partial');
   } finally { release(); f.close(); }
+});
+function setupWithTools(generate: Generate, toolbag: Toolbag) {
+  const store = new Store(':memory:');
+  const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => { finish = resolve; });
+  const chat = new Chat(store, generate, (result) => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); }, async () => toolbag);
+  return { store, id, chat, done, send: () => chat.start({ conversationId: id, text: 'List apps', model: 'deepseek-flash', credentials }), close: () => { chat.close(); store.close(); } };
+}
+test('tool calls execute through the bag, persist on the reply, and close', async () => {
+  let closed = 0;
+  const executed: Array<{ name: string; args: unknown }> = [];
+  const bag: Toolbag = {
+    tools: [{ name: 'list_apps', description: 'List running apps.', inputSchema: { type: 'object' } }],
+    execute: async (name, args) => { executed.push({ name, args }); return { text: 'Chrome\nSpotify', isError: false }; },
+    close: () => { closed++; },
+  };
+  const f = setupWithTools(async function* (turn) {
+    const seen = turn.tools ? await turn.tools[0].execute({}) : 'none';
+    yield `Apps: ${seen}`;
+  }, bag);
+  try {
+    f.send();
+    await f.done;
+    const reply = f.store.messages(f.id).at(-1)!;
+    expect(reply).toMatchObject({ role: 'assistant', text: 'Apps: Chrome\nSpotify', status: 'complete' });
+    expect(executed).toEqual([{ name: 'list_apps', args: {} }]);
+    expect(reply.toolCalls).toHaveLength(1);
+    expect(reply.toolCalls![0]).toMatchObject({ name: 'list_apps', label: 'Listing apps', status: 'ok', summary: 'Chrome Spotify' });
+    expect(closed).toBe(1);
+  } finally { f.close(); }
+});
+test('tool failures return an error string to the model instead of failing the turn', async () => {
+  const bag: Toolbag = {
+    tools: [{ name: 'click', description: 'Click.', inputSchema: { type: 'object' } }],
+    execute: async () => { throw new Error('no target'); },
+    close: () => {},
+  };
+  const f = setupWithTools(async function* (turn) {
+    yield turn.tools ? await turn.tools[0].execute({}) : '';
+  }, bag);
+  try {
+    f.send();
+    await f.done;
+    const reply = f.store.messages(f.id).at(-1)!;
+    expect(reply.status).toBe('complete');
+    expect(reply.text).toContain('Tool failed: no target');
+    expect(reply.toolCalls![0].status).toBe('failed');
+  } finally { f.close(); }
 });
 test('model/provider validation occurs before writes and settings changes do not redirect active turn', async () => {
   let turn: Turn | undefined;

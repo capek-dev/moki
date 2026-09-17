@@ -12,6 +12,18 @@ const render = (text: string) => renderToStaticMarkup(<Answer text={text} />);
 test('renders headings, lists, inline code, quotes, tables and fenced code', () => {
   const html = render('# Heading\n\n**Bold** and *italic* with `inline`\n\n- one\n- two\n\n> quote\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```ts\nconst x = 1;\n```');
   for (const expected of ['<h1>', '<strong>', '<em>', '<ul>', '<li>', '<blockquote>', '<table>', '<code', '<pre>', 'Copy code', 'Copy answer']) expect(html).toContain(expected);
+  expect(html).toContain('class="answer-code"');
+});
+
+test('code blocks scroll inside their box instead of stretching the conversation', async () => {
+  const css = await Bun.file('src/renderer/styles/tailwind.css').text();
+  // The answer shell is a grid item; without min-width:0 the track widens to
+  // the longest code line even though the pre itself scrolls.
+  expect(css).toContain('.answer-shell { min-width: 0; max-width: 100%; }');
+  expect(css).toContain('.answer-code { min-width: 0; max-width: 100%; overflow: hidden;');
+  expect(css).toContain('.answer-code pre { margin: 0; padding: .75rem; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; white-space: pre; overflow-wrap: normal; }');
+  // Wide tables get the same treatment.
+  expect(css).toContain('.answer-table { max-width: 100%; overflow-x: auto; }');
 });
 
 test('raw HTML and remote images cannot create active content', () => {
