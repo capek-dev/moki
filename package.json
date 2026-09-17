@@ -59,7 +59,10 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg"],
-      "identity": null
+      "identity": null,
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "Moki captures a screen region only when you choose Capture region."
+      }
     }
   }
 }

@@ -1,8 +1,10 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Tray, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, Tray, safeStorage, shell } from 'electron';
 import { requireCopyText, requireWebLink } from '../shared/answer-actions';
+import { attachmentDirectories, requireAttachmentId } from '../shared/attachments';
+import { ScreenshotCapture } from './screenshot-capture';
 import { EncryptedVault, ProviderConnections } from './provider-connections';
 import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { Runtime } from './runtime';
 import { requireThinking } from '../shared/models';
@@ -11,6 +13,7 @@ import { userDataPath } from '../shared/data-paths';
 
 import { DEV_ORIGIN, isDevelopment } from '../shared/development';
 
+protocol.registerSchemesAsPrivileged([{ scheme: 'moki-attachment', privileges: { secure: true, supportFetchAPI: true } }]);
 const development = isDevelopment(app.isPackaged, process.env.MOKI_DEV);
 app.setName(development ? 'Moki Dev' : 'Moki');
 try {
@@ -32,6 +35,7 @@ function broadcast(result: Result) {
 let tray: Tray | undefined;
 let runtime: Runtime | undefined;
 let providers: ProviderConnections | undefined;
+let capture: ScreenshotCapture | undefined;
 let quitting = false;
 let shutdownComplete = false;
 // macOS gets real window glass (vibrancy behind translucent panels); other
@@ -111,6 +115,21 @@ else {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:runtime-error', message);
     });
     await runtime.ready;
+    const attachmentDirs = attachmentDirectories(app.getPath('userData'));
+    mkdirSync(attachmentDirs.drafts, { recursive: true, mode: 0o700 });
+    mkdirSync(attachmentDirs.content, { recursive: true, mode: 0o700 });
+    protocol.handle('moki-attachment', (request) => {
+      try {
+        const url = new URL(request.url);
+        const id = requireAttachmentId(url.hostname);
+        if (url.pathname !== '/' || url.search || url.hash) throw new Error('Invalid attachment URL.');
+        const draft = join(attachmentDirs.drafts, `${id}.png`);
+        const content = join(attachmentDirs.content, `${id}.png`);
+        const path = existsSync(draft) ? draft : existsSync(content) ? content : undefined;
+        if (!path) return new Response('Not found', { status: 404 });
+        return new Response(readFileSync(path), { headers: { 'content-type': 'image/png', 'cache-control': 'no-store' } });
+      } catch { return new Response('Invalid attachment', { status: 400 }); }
+    });
     window = new BrowserWindow({
       width: 440, height: 680, minWidth: 360, minHeight: 480,
       title: development ? 'Moki Dev' : 'Moki',
@@ -118,6 +137,7 @@ else {
       ...glassWindow,
     });
     secureWindow(window);
+    capture = new ScreenshotCapture(app.getPath('userData'), () => window);
     providers = new ProviderConnections(new EncryptedVault(join(app.getPath('userData'), 'providers.encrypted'), safeStorage), (url) => shell.openExternal(url), (state) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:providers-state', state);
     });
@@ -136,17 +156,21 @@ else {
       assertTrusted(event);
       return shell.openExternal(requireWebLink(url));
     });
+    ipcMain.handle('moki:start-capture', (event) => { assertTrusted(event); return capture!.start(); });
+    ipcMain.handle('moki:remove-capture', (event, id: unknown) => { assertTrusted(event); capture!.remove(id); });
+    ipcMain.handle('moki:screen-recording-settings', (event) => { assertTrusted(event); return capture!.openPermissionSettings(); });
     ipcMain.handle('moki:request', async (event, input: unknown) => {
       assertTrusted(event);
       // Explicit ingress allowlist blocks private credential-bearing pipe commands.
-      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
+      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat', 'revertMessage'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
       const request = input as Request;
       if (request.method === 'cancelChat') pendingChats.delete(request.conversationId);
       return broadcast(await runtime!.request(request));
     });
     ipcMain.handle('moki:chat', async (event, input: ChatRequest) => {
       assertTrusted(event);
-      if (!input || typeof input.conversationId !== 'string' || input.conversationId.length > 100 || typeof input.text !== 'string' || !input.text.trim() || input.text.length > 16000 || typeof input.model !== 'string') throw new Error('Invalid chat request.');
+      if (!input || typeof input.conversationId !== 'string' || input.conversationId.length > 100 || typeof input.text !== 'string' || !input.text.trim() || input.text.length > 16000 || typeof input.model !== 'string' || (input.attachmentIds !== undefined && (!Array.isArray(input.attachmentIds) || input.attachmentIds.length > 1)) || (input.editOf !== undefined && (typeof input.editOf !== 'string' || input.editOf.length > 100))) throw new Error('Invalid chat request.');
+      for (const attachmentId of input.attachmentIds ?? []) requireAttachmentId(attachmentId);
       const id = input.conversationId;
       if (pendingChats.has(id)) throw new Error('A message is already starting.');
       const pending = {}; pendingChats.set(id, pending);
@@ -159,7 +183,7 @@ else {
         if (result.snapshot.messages.some((m) => m.conversationId === id && m.status === 'streaming')) throw new Error('This conversation is already replying.');
         const credentials = await providers!.credentials(assistant.provider);
         if (quitting || pendingChats.get(id) !== pending) throw new Error('Message cancelled.');
-        return broadcast(await runtime!.startChat({ conversationId: id, text: input.text, model: input.model, thinking }, credentials));
+        return broadcast(await runtime!.startChat({ conversationId: id, text: input.text, model: input.model, thinking, attachmentIds: input.attachmentIds, editOf: input.editOf }, credentials));
       } finally { if (pendingChats.get(id) === pending) pendingChats.delete(id); }
     });
     window.on('close', (event) => { if (!quitting) { event.preventDefault(); window?.hide(); } });
@@ -167,8 +191,11 @@ else {
     tray = new Tray(nativeImage.createEmpty());
     tray.setTitle('●');
     tray.setToolTip('Moki');
+    const startCapture = () => { void capture!.start().catch((error) => dialog.showErrorBox('Could not capture region', String(error))); };
+    const shortcutRegistered = globalShortcut.register('CommandOrControl+Shift+8', startCapture);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open Moki', click: show },
+      { label: shortcutRegistered ? 'Capture region…' : 'Capture region… (shortcut unavailable)', click: startCapture },
       { label: 'History…', click: showHistory },
       { label: 'Settings…', click: showSettings },
       { label: 'Keep on top', type: 'checkbox', click: (item) => window?.setAlwaysOnTop(item.checked) },
@@ -177,7 +204,7 @@ else {
     ]));
     tray.on('click', show);
     Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: 'Moki', submenu: [{ label: 'Show Moki', click: show }, { label: 'History…', accelerator: 'CmdOrCtrl+Y', click: showHistory }, { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings }, { role: 'quit' }] },
+      { label: 'Moki', submenu: [{ label: 'Show Moki', click: show }, { label: 'Capture region…', accelerator: shortcutRegistered ? 'CmdOrCtrl+Shift+8' : undefined, click: startCapture }, { label: 'History…', accelerator: 'CmdOrCtrl+Y', click: showHistory }, { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings }, { role: 'quit' }] },
       { role: 'editMenu' },
       { role: 'windowMenu' },
       ...(development ? [{ label: 'Developer', submenu: [
@@ -203,6 +230,8 @@ else {
     event.preventDefault();
     if (quitting) return;
     quitting = true;
+    globalShortcut.unregisterAll();
+    capture?.close();
     providers?.close();
     void (runtime?.close() ?? Promise.resolve()).finally(() => { shutdownComplete = true; app.quit(); });
   });

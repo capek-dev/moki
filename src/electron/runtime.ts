@@ -51,7 +51,7 @@ export class Runtime {
     this.child.stderr.resume();
   }
   startChat(request: ChatRequest, credentials: Credentials): Promise<Result> {
-    return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, credentials });
+    return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials });
   }
   request(request: Request): Promise<Result> { return this.send(request); }
   private async send(request: unknown): Promise<Result> {

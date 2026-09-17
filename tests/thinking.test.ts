@@ -20,11 +20,11 @@ test('thinking persists per conversation, defaults on model change and survives 
   try {
     const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
     expect(store.conversation(id).thinking).toBeNull();
-    store.handle({ method: 'selectModel', conversationId: id, model: 'deepseek-v4-pro', thinking: 'max' });
+    store.handle({ method: 'selectModel', conversationId: id, model: 'deepseek-flash', thinking: 'max' });
     store.close(); store = new Store(path);
     expect(store.conversation(id).thinking).toBe('max');
     expect(() => store.handle({ method: 'selectModel', conversationId: id, model: 'deepseek-flash', thinking: 'low' })).toThrow();
-    expect(store.conversation(id)).toMatchObject({ model: 'deepseek-v4-pro', thinking: 'max' });
+    expect(store.conversation(id)).toMatchObject({ model: 'deepseek-flash', thinking: 'max' });
     store.handle({ method: 'selectModel', conversationId: id, model: 'deepseek-flash' });
     expect(store.conversation(id).thinking).toBeNull();
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
@@ -35,7 +35,7 @@ test('turn thinking is pinned and attributed despite subsequent setting changes'
   let turn: Turn | undefined;
   const chat = new Chat(store, async function* (value) { turn = value; yield 'ok'; }, () => {});
   try {
-    const input = { conversationId: id, text: 'Hi', model: 'deepseek-v4-pro', credentials: { provider: 'deepseek' as const, key: 'offline' } };
+    const input = { conversationId: id, text: 'Hi', model: 'deepseek-flash', credentials: { provider: 'deepseek' as const, key: 'offline' } };
     expect(() => chat.start({ ...input, thinking: 'low' })).toThrow();
     expect(store.messages(id)).toHaveLength(0);
     chat.start({ ...input, thinking: 'max' });

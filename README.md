@@ -4,17 +4,27 @@ A macOS-first, minimal desktop assistant built with Electron, React, and a bundl
 
 ## Current slice
 
-Text chat with DeepSeek and Codex subscription: one Moki with editable instructions, provider, and avatar, a per-conversation model picker, streamed replies, Stop, and SQLite-saved history. A small chat window, separate Settings, tray reopen/quit, and optional always-on-top. No workspace setup. Existing local notes are retained as user messages.
+Chat with DeepSeek and Codex subscription: one Moki with editable instructions, provider, and avatar, a per-conversation model picker, streamed replies, Stop, saved screenshot questions, and SQLite history. A small chat window, separate Settings, tray reopen/quit, and optional always-on-top. No workspace setup. Existing local notes are retained as user messages.
 
 Settings (Cmd+,) now supports DeepSeek API key verification/storage and Codex subscription sign-in. Credentials are encrypted using Electron safeStorage under userData, never returned to the UI. One subscription is stored initially. Codex opens a browser and completes sign-in automatically through a temporary localhost callback on port 1455. The listener binds only to IPv4/IPv6 loopback and closes on completion, cancellation, timeout, or Quit. Sign-in expires after five minutes. If another app is using port 1455, close its sign-in attempt before retrying. Disconnect removes local credentials, it does not revoke the upstream grant.
 
-To chat: connect a provider, select it under Settings > Moki, start a conversation, select a model, and Send. Model choices come from a curated Jean2 catalog, not a guarantee of subscription availability. No automatic fallback. Codex refreshes expired credentials before a turn; rejected access requires reconnecting rather than replaying a turn. Disconnect removes credentials for future turns; use Stop to abort a running reply.
+To chat: connect a provider, select it under Settings > Moki, start a conversation, select a model, and Send. Model choices come from a curated Jean2 catalog, not a guarantee of subscription availability. No automatic fallback. Codex refreshes expired credentials before a turn; rejected access requires reconnecting rather than replaying a turn. Disconnect removes credentials for future turns; use Stop to abort a running reply. Hover any of your own messages to **Unsend** it (its text returns to the composer) or **Edit and resend** it; both remove everything after that message, including replies and their screenshots.
 
-Replies use Čapek's published model adapters and AI SDK streaming, not the full agent/tool loop yet. **MCP/cua.ai, screenshots, memory, session search, and learning remain unimplemented.** Text-only history displays the latest 100 messages and sends up to 60k characters of recent completed history. The picker lists the latest 100 conversations; older records stay on disk. Replies are limited to three minutes and 64k characters. Interrupted/failed partial replies are saved but not replayed into subsequent model context. No reasoning logs or tool cards.
+Replies use Čapek's published model adapters and AI SDK streaming, not the full agent/tool loop yet. **MCP/cua.ai, arbitrary file attachments, memory, session search, and learning remain unimplemented.** History displays the latest 100 messages and sends up to 60k characters of recent completed text plus a separately bounded set of saved screenshots. The picker lists the latest 100 conversations; older records stay on disk. Replies are limited to three minutes and 64k characters. Interrupted/failed partial replies are saved but not replayed into subsequent model context. No reasoning logs or tool cards.
 
 Automated verification uses offline provider responses; live model access and native UI need manual verification. Codex browser sign-in was confirmed working by the user before this slice.
 
 Provider-focused checks: `bun test tests/provider-connections.test.ts tests/settings-window.test.ts tests/desktop-paths.test.ts` after building.
+
+## Screenshot questions
+
+Press **Cmd+Shift+8** from any app, choose **Capture region…** from Moki's tray/menu, or use the capture button beside the model picker. Drag over a rectangular screen region, then Moki opens with the screenshot previewed and the prompt focused. Escape cancels selection without changing the current draft. Screenshots are saved with their user messages and can be opened at a larger size from conversation history.
+
+macOS requires Screen Recording permission. If access is denied, Moki links to System Settings and may need to be restarted after permission changes. The native region selector handles Retina and multiple-display selection. If the global shortcut is already used by another app, the tray and composer actions remain available.
+
+Image input is model-gated. DeepSeek Flash and the curated Codex models send the screenshot as actual multimodal input; DeepSeek V4 Pro remains text-only. Moki disables Send rather than dropping the image or silently switching models. Screenshot files remain in Moki's private data directory, while renderer APIs use random attachment IDs instead of local paths.
+
+Automated checks inspect serialized DeepSeek and Codex payloads without live provider calls. Native selection, Screen Recording consent, multiple displays, and live image interpretation still require manual Electron verification.
 
 ## Readable answers
 
@@ -22,7 +32,7 @@ Assistant replies render Markdown with headings, lists, tables, quotes, and code
 
 Raw HTML is disabled. Images display alt text without loading remote resources. HTTP(S) links open in the default browser on click; file, script, relative, and credential-bearing URLs are not clickable. Clipboard access is write-only through validated Electron IPC.
 
-Focused checks: `bun test tests/answer.test.tsx`. Native clipboard, browser opening, and visual layout still require manual Electron verification.
+Focused checks: `bun test tests/answer.test.tsx tests/screenshot.test.tsx tests/chat.test.ts tests/model-stream.test.ts`. Native clipboard, browser opening, screen capture, and visual layout still require manual Electron verification.
 
 ## Single Moki
 
@@ -43,6 +53,8 @@ bun run desktop
 ## Development
 
 Run `bun run dev` to build the isolated Electron shell/backend, start Vite on `127.0.0.1:5173`, and open **Moki Dev** with detached DevTools. Right-click **Inspect Element**, or press **Cmd+Option+I**, in chat, Settings, or History.
+
+On macOS, the first run prepares the ignored `dist/dev-shell/Moki Dev.app` with the stable bundle identifier `app.moki.desktop.dev` and a Screen Recording usage description. Grant Screen Recording to that exact app, not `node_modules/electron/dist/Electron.app`. After changing the permission, fully quit and rerun `bun run dev`. The cached app is rebuilt only when its preparation revision or Electron version changes.
 
 React component and CSS changes hot reload. Source maps expose TSX in DevTools. Changes to Electron, preload, backend, or build configuration require stopping and rerunning `bun run dev`. Some shared-module edits cause a full page reload, which resets unsent drafts.
 

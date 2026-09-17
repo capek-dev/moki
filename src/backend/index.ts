@@ -11,7 +11,7 @@ import * as capek from '@capekai/core/composition';
 const dataDir = process.env.MOKI_DATA_DIR;
 if (!dataDir) throw new Error('MOKI_DATA_DIR is required.');
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-const store = new Store(databasePath(dataDir));
+const store = new Store(databasePath(dataDir), dataDir);
 let revision = 0;
 const stamp = (result: Result) => ({ ...result, revision: ++revision });
 const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ event: 'state', result: stamp(result) })));

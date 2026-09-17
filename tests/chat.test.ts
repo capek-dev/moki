@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/backend/store';
-import { Chat, type Generate, type Turn } from '../src/backend/chat';
+import { Chat, history, type Generate, type Turn } from '../src/backend/chat';
 import { applyResult } from '../src/renderer/chat-state';
-import type { Result } from '../src/shared/protocol';
+import type { Attachment, Message, Result } from '../src/shared/protocol';
 
 const credentials = { provider: 'deepseek' as const, key: 'test-secret' };
 function setup(generate: Generate) {
@@ -16,7 +16,7 @@ function setup(generate: Generate) {
   const done = new Promise<void>((resolve) => { finish = resolve; });
   const events: Result[] = [];
   const chat = new Chat(store, generate, (result) => { events.push(result); if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); });
-  return { store, id, chat, done, events, send: () => chat.start({ conversationId: id, text: 'Hello', model: 'deepseek-v4-pro', credentials }), close: () => { chat.close(); store.close(); } };
+  return { store, id, chat, done, events, send: () => chat.start({ conversationId: id, text: 'Hello', model: 'deepseek-flash', credentials }), close: () => { chat.close(); store.close(); } };
 }
 test('streamed replies persist, carry attribution, and reuse role-based history', async () => {
   const turns: Turn[] = [];
@@ -24,7 +24,7 @@ test('streamed replies persist, carry attribution, and reuse role-based history'
   try {
     expect(f.send().snapshot.messages.at(-1)?.status).toBe('streaming');
     await f.done;
-    expect(f.store.messages(f.id).at(-1)).toMatchObject({ role: 'assistant', text: 'Hello there', status: 'complete', model: 'deepseek-v4-pro', assistantName: 'Moki' });
+    expect(f.store.messages(f.id).at(-1)).toMatchObject({ role: 'assistant', text: 'Hello there', status: 'complete', model: 'deepseek-flash', assistantName: 'Moki' });
     expect(turns[0].messages).toEqual([{ role: 'user', content: 'Hello' }]);
     f.send();
     await new Promise((r) => setTimeout(r, 5));
@@ -83,11 +83,58 @@ test('additive migration preserves old notes; restart marks unfinished response 
   try {
     const store = new Store(path);
     expect(store.messages('c')[0]).toMatchObject({ text: 'Saved before chat', role: 'user', status: 'complete' });
-    const { messageId } = store.begin('c', 'New', 'deepseek-v4-pro');
+    const { messageId } = store.begin('c', 'New', 'deepseek-flash');
     store.updateReply(messageId, 'partial', 'streaming'); store.close();
     const reopened = new Store(path);
     try { expect(reopened.messages('c').at(-1)).toMatchObject({ text: 'partial', status: 'interrupted' }); } finally { reopened.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test('screenshots move into durable message storage and replay as image content', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'moki-images-'));
+  const store = new Store(join(dir, 'moki.sqlite'), dir);
+  try {
+    const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+    const attachmentId = crypto.randomUUID();
+    const draft = join(dir, 'attachments', 'drafts', `${attachmentId}.png`);
+    const png = Buffer.alloc(24); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png); png.writeUInt32BE(320, 16); png.writeUInt32BE(180, 20);
+    writeFileSync(draft, png);
+    expect(() => store.begin(id, 'Read this', 'deepseek-v4-pro', null, [attachmentId])).toThrow('supported model');
+    expect(existsSync(draft)).toBe(true);
+    store.begin(id, 'Read this', 'deepseek-flash', null, [attachmentId]);
+    const snapshot = store.snapshot(id);
+    expect(snapshot.attachments).toEqual([{ id: attachmentId, messageId: snapshot.messages[0].id, mime: 'image/png', byteSize: 24, width: 320, height: 180 }]);
+    expect(existsSync(draft)).toBe(false);
+    expect(existsSync(join(dir, 'attachments', 'content', `${attachmentId}.png`))).toBe(true);
+    const replay = history(snapshot.messages, snapshot.attachments, (value) => store.attachmentBytes(value));
+    expect(replay[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'Read this' }, { type: 'image', mediaType: 'image/png' }] });
+    expect(JSON.stringify(snapshot)).not.toContain(dir);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+test('image history limits omit old images without dropping their message text', () => {
+  const messages = Array.from({ length: 5 }, (_, index): Message => ({
+    id: `message-${index}`,
+    conversationId: 'conversation',
+    text: `Text ${index}`,
+    role: 'user',
+    status: 'complete',
+    model: null,
+    assistantName: null,
+    error: null,
+    thinking: null,
+  }));
+  const attachments = messages.map((message, index): Attachment => ({
+    id: `attachment-${index}`,
+    messageId: message.id,
+    mime: 'image/png',
+    byteSize: 1,
+    width: 1,
+    height: 1,
+  }));
+  const read: string[] = [];
+  const replay = history(messages, attachments, (attachmentId) => { read.push(attachmentId); return new Uint8Array([1]); });
+  expect(replay).toHaveLength(5);
+  expect(read).toEqual(['attachment-4', 'attachment-3', 'attachment-2', 'attachment-1']);
+  expect(replay[0]).toEqual({ role: 'user', content: 'Text 0' });
 });
 test('history reads are bounded and cross-window stale responses cannot replace live text', () => {
   const f = setup(async function* () { yield 'ok'; });

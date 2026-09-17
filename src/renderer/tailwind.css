@@ -79,10 +79,18 @@
    Base
 --------------------------------------------------------------------------- */
 @layer base {
-  html { color-scheme: light dark; height: 100%; }
+  html { color-scheme: light dark; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+  #root {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+  }
   body {
     margin: 0;
-    min-height: 100dvh;
     background: var(--page);
     color: var(--ink);
     font-family: var(--font-sans);
@@ -151,6 +159,11 @@
   .answer-copy { opacity: 0; transition: opacity 150ms ease; }
   .answer-shell:hover .answer-copy, .answer-shell:focus-within .answer-copy { opacity: 1; }
   @media (hover: none) { .answer-copy { opacity: 1; } }
+
+  /* Unsend/edit actions beside user messages, same reveal rules as answer-copy. */
+  .user-actions { opacity: 0; transition: opacity 150ms ease; }
+  .user-row:hover .user-actions, .user-actions:focus-within { opacity: 1; }
+  @media (hover: none) { .user-actions { opacity: 1; } }
   .answer-markdown { min-width: 0; overflow-wrap: anywhere; }
   .answer-markdown > * + * { margin-top: .75rem; }
   .answer-markdown :is(h1, h2, h3, h4, h5, h6) { font-weight: 600; line-height: 1.35; margin-top: 1rem; }

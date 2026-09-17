@@ -10,6 +10,7 @@ test('compiled stylesheet ships tone tokens, glass surfaces and the creature ani
   expect(css).toContain('creature-stage');
   expect(css).toContain('tone-swatch');
   expect(css).toContain('titlebar');
+  expect(css).toMatch(/#root\{[^}]*position:fixed[^}]*inset:0[^}]*overflow:hidden/);
   expect(css).toContain('prefers-reduced-motion');
 });
 

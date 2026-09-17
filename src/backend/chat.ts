@@ -1,35 +1,54 @@
+import type { ModelMessage } from 'ai';
 import { Store, text } from './store';
 import { requireThinking, type Thinking } from '../shared/models';
-import type { Provider, Result, Message } from '../shared/protocol';
+import type { Attachment, Provider, Result, Message } from '../shared/protocol';
+import { requireAttachmentId } from '../shared/attachments';
 
 // Private pipe contract, never exposed through the renderer's request union.
 export type Credentials = { provider: 'deepseek'; key: string } | { provider: 'codex'; access: string; accountId: string };
-export interface Turn { conversationId: string; thinking?: Thinking | null; model: string; provider: Provider; instructions: string; messages: { role: 'user' | 'assistant'; content: string }[]; credentials: Credentials }
+export interface Turn { conversationId: string; thinking?: Thinking | null; model: string; provider: Provider; instructions: string; messages: ModelMessage[]; credentials: Credentials }
 export type Generate = (turn: Turn, signal: AbortSignal) => AsyncIterable<string>;
-export function history(messages: Message[]) {
-  let size = 0;
-  const result: Turn['messages'] = [];
+export function history(messages: Message[], attachments: Attachment[] = [], readImage?: (id: string) => Uint8Array) {
+  let textSize = 0;
+  let imageSize = 0;
+  let imageCount = 0;
+  const result: ModelMessage[] = [];
+  const byMessage = new Map<string, Attachment[]>();
+  for (const attachment of attachments) byMessage.set(attachment.messageId, [...(byMessage.get(attachment.messageId) ?? []), attachment]);
   for (const message of [...messages].reverse()) {
     if (!message.text || message.status === 'streaming' || (message.role === 'assistant' && message.status !== 'complete')) continue;
-    if (size + message.text.length > 60000) break;
-    size += message.text.length;
-    result.unshift({ role: message.role, content: message.text });
+    if (textSize + message.text.length > 60000) break;
+    const images: Attachment[] = [];
+    if (message.role === 'user') {
+      for (const image of byMessage.get(message.id) ?? []) {
+        if (imageCount >= 4 || imageSize + image.byteSize > 32 * 1024 * 1024) continue;
+        images.push(image); imageCount++; imageSize += image.byteSize;
+      }
+    }
+    textSize += message.text.length;
+    result.unshift(images.length
+      ? { role: 'user', content: [{ type: 'text', text: message.text }, ...images.map((image) => ({ type: 'image' as const, image: readImage!(image.id), mediaType: image.mime }))] }
+      : { role: message.role, content: message.text });
   }
   return result;
 }
 export class Chat {
   private active = new Map<string, { abort: AbortController; finish: () => void }>();
   constructor(private store: Store, private generate: Generate, private publish: (result: Result) => void) {}
-  start(input: { conversationId: string; text: string; model: string; thinking?: Thinking | null; credentials: Credentials }): Result {
+  start(input: { conversationId: string; text: string; model: string; thinking?: Thinking | null; attachmentIds?: unknown[]; editOf?: string; credentials: Credentials }): Result {
     const id = text(input.conversationId, 100);
+    if (input.editOf !== undefined && typeof input.editOf !== 'string') throw new Error('Invalid edit target.');
     const body = text(input.text, 16000);
+    const attachmentIds = input.attachmentIds === undefined ? [] : input.attachmentIds;
+    if (!Array.isArray(attachmentIds) || attachmentIds.length > 1) throw new Error('Invalid attachments.');
+    for (const attachmentId of attachmentIds) requireAttachmentId(attachmentId);
     const assistant = this.store.assistantFor(id);
     const thinking = requireThinking(assistant.provider, input.model, input.thinking);
     if (!input.credentials || input.credentials.provider !== assistant.provider) throw new Error('Provider changed. Send again with the selected provider.');
     if (input.credentials.provider === 'deepseek') text(input.credentials.key, 32000);
     else { text(input.credentials.access, 32000); text(input.credentials.accountId, 32000); }
     if (this.active.has(id)) throw new Error('This conversation is already replying.');
-    const { messageId } = this.store.begin(id, body, input.model, thinking);
+    const { messageId } = this.store.begin(id, body, input.model, thinking, attachmentIds, input.editOf);
     const abort = new AbortController();
     let output = '';
     let finished = false;
@@ -48,7 +67,8 @@ export class Chat {
     };
     const deadline = setTimeout(() => { abort.abort(); finish('failed', 'Reply timed out. You can send a new message.'); }, 180000);
     this.active.set(id, { abort, finish: () => finish('interrupted') });
-    const turn: Turn = { conversationId: id, thinking, model: input.model, provider: assistant.provider, instructions: assistant.instructions, credentials: input.credentials, messages: history(this.store.messages(id)) };
+    const messages = this.store.messages(id);
+    const turn: Turn = { conversationId: id, thinking, model: input.model, provider: assistant.provider, instructions: assistant.instructions, credentials: input.credentials, messages: history(messages, this.store.attachmentsFor(messages), (attachmentId) => this.store.attachmentBytes(attachmentId)) };
     // Start after the request has been acknowledged. Tool execution is not enabled.
     queueMicrotask(() => { void (async () => {
       try {

@@ -41,7 +41,7 @@ export function Settings() {
     void load();
     return unsubscribe;
   }, []);
-  return <main className={`flex h-dvh flex-col ${platformClass ?? ''}`}>
+  return <main className={`flex h-full flex-col ${platformClass ?? ''}`}>
     <header className="titlebar flex min-h-12 items-end pb-2">
       <h1 className="pl-1 text-[13px] font-semibold tracking-[.02em] text-ink">Settings</h1>
     </header>

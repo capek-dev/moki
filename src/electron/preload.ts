@@ -18,6 +18,14 @@ const api: DesktopAPI = {
   openHistory: () => ipcRenderer.invoke('moki:history'),
   copyText: (text) => ipcRenderer.invoke('moki:copy-text', text),
   openWebLink: (url) => ipcRenderer.invoke('moki:open-web-link', url),
+  startCapture: () => ipcRenderer.invoke('moki:start-capture'),
+  removeCapture: (id) => ipcRenderer.invoke('moki:remove-capture', id),
+  openScreenRecordingSettings: () => ipcRenderer.invoke('moki:screen-recording-settings'),
+  onCapture: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value);
+    ipcRenderer.on('moki:capture', handler);
+    return () => ipcRenderer.removeListener('moki:capture', handler);
+  },
   onState: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, result: Parameters<typeof listener>[0]) => listener(result);
     ipcRenderer.on('moki:state', handler);

@@ -2,13 +2,12 @@ import type { Provider } from './protocol';
 
 // Initial curated catalog from Jean2's provider configuration. Availability is
 // decided by the provider, not inferred from a successful OAuth login.
-export const MODELS: { id: string; name: string; provider: Provider }[] = [
-  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', provider: 'deepseek' },
-  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', provider: 'deepseek' },
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'codex' },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', provider: 'codex' },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', provider: 'codex' },
-  { id: 'gpt-6-astra', name: 'GPT-6 Astra', provider: 'codex' },
+export const MODELS: { id: string; name: string; provider: Provider; imageInput: boolean }[] = [
+  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', provider: 'deepseek', imageInput: true },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'codex', imageInput: true },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', provider: 'codex', imageInput: true },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', provider: 'codex', imageInput: true },
+  { id: 'gpt-6-astra', name: 'GPT-6 Astra', provider: 'codex', imageInput: true },
 ];
 export function requireModel(provider: unknown, model: unknown) {
   const found = MODELS.find((item) => item.provider === provider && item.id === model);
@@ -16,6 +15,7 @@ export function requireModel(provider: unknown, model: unknown) {
   return found;
 }
 export function defaultModel(provider: Provider): string { return MODELS.find((item) => item.provider === provider)!.id; }
+export function supportsImageInput(provider: Provider, model: string): boolean { return requireModel(provider, model).imageInput; }
 
 export type Thinking = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export function thinkingLevels(provider: Provider, model: string): Thinking[] {

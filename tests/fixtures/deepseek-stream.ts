@@ -7,7 +7,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   assert.equal(String(input), 'https://api.deepseek.com/v1/chat/completions');
   assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer offline-test');
   const body = JSON.parse(String(init?.body));
-  assert.equal(body.model, 'deepseek-v4-pro');
+  assert.equal(body.model, 'deepseek-flash');
   assert.equal(body.stream, true);
   assert.equal(body.messages[0].role, 'system');
   assert.equal(body.messages[0].content, 'Be kind.');
@@ -27,7 +27,7 @@ const { generate } = await import('../../src/backend/model-stream');
 for (const level of [null, 'high', 'max'] as const) {
 thinking = level;
 let output = '';
-for await (const delta of generate({ thinking, conversationId: 'c', model: 'deepseek-v4-pro', provider: 'deepseek', instructions: 'Be kind.', credentials: { provider: 'deepseek', key: 'offline-test' }, messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }] }, new AbortController().signal)) output += delta;
+for await (const delta of generate({ thinking, conversationId: 'c', model: 'deepseek-flash', provider: 'deepseek', instructions: 'Be kind.', credentials: { provider: 'deepseek', key: 'offline-test' }, messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }] }, new AbortController().signal)) output += delta;
 assert.equal(output, 'Hello');
 }
 assert.equal(calls, 3);

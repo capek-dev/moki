@@ -46,3 +46,19 @@ export function Stop(props: SVGProps<SVGSVGElement>) {
 export function Copy(props: SVGProps<SVGSVGElement>) {
   return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...stroke} {...props}><rect x="5.5" y="5.5" width="7" height="7" rx="1.5" /><path d="M10.5 5.5v-1A1.5 1.5 0 0 0 9 3H4.5A1.5 1.5 0 0 0 3 4.5V9A1.5 1.5 0 0 0 4.5 10.5h1" /></svg>;
 }
+
+export function Capture(props: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" {...stroke} {...props}><path d="M5.5 2.5h-2a1 1 0 0 0-1 1v2m8-3h2a1 1 0 0 1 1 1v2m0 5v2a1 1 0 0 1-1 1h-2m-5 0h-2a1 1 0 0 1-1-1v-2" /><rect x="5" y="5" width="6" height="6" rx="1" /></svg>;
+}
+
+export function Close(props: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...stroke} {...props}><path d="m4 4 8 8m0-8-8 8" /></svg>;
+}
+
+export function Undo(props: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...stroke} {...props}><path d="M3.5 6.5h6a3 3 0 1 1 0 6H6" /><path d="M5.5 4 3 6.5 5.5 9" /></svg>;
+}
+
+export function Pencil(props: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...stroke} {...props}><path d="M11.2 2.7a1.7 1.7 0 0 1 2.4 2.4L6 12.7l-3.2.8.8-3.2Z" /></svg>;
+}

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
+import { prepareDevApp } from './dev-app';
 
 process.chdir(resolve(import.meta.dirname, '..'));
 let child: ChildProcess | undefined;
@@ -35,10 +36,13 @@ try {
       await server.listen();
       if (stopping) await server.close();
       else {
-        const electron = createRequire(import.meta.url)('electron') as string;
+        const require = createRequire(import.meta.url);
+        const electron = require('electron') as string;
+        const electronVersion = (require('electron/package.json') as { version: string }).version;
+        const devElectron = await prepareDevApp(electron, electronVersion);
         const env = { ...process.env, MOKI_DEV: '1' };
         delete (env as NodeJS.ProcessEnv).ELECTRON_RUN_AS_NODE;
-        child = spawn(electron, [resolve('dist/dev')], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env });
+        child = spawn(devElectron, [resolve('dist/dev')], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env });
         exited = new Promise((resolve) => { child!.once('exit', (code) => { resolve(); void stop(code ?? 0); }); child!.once('error', (error) => { console.error(error); resolve(); void stop(1); }); });
         console.log('Moki Dev: renderer hot reload enabled. Restart this command after main/backend edits. Ctrl+C stops the app and server.');
       }
