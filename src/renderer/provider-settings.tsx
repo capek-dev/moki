@@ -35,7 +35,7 @@ export function ProviderSettings() {
     return unsubscribe;
   }, []);
   return <div className="grid max-w-md gap-3">
-    <p className="text-[12.5px] text-ink-3">Credentials are encrypted on this Mac. Choose this provider in your companion's settings, then select a model in chat.</p>
+    <p className="text-[12.5px] text-ink-3">Credentials are encrypted on this Mac. Choose this provider in Moki settings, then select a model in chat.</p>
     <Panel className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-[13.5px] font-semibold">DeepSeek</h3>

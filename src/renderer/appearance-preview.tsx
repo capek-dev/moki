@@ -29,7 +29,7 @@ export function AppearancePreview({ appearance, onChange }: { appearance: Appear
   return <div className="grid gap-4">
     <div>
       <h3 className="text-[13.5px] font-semibold">Appearance</h3>
-      <p className="mt-0.5 text-[12.5px] text-ink-3">Customize this companion's avatar. Choose Save companion below to keep your changes.</p>
+      <p className="mt-0.5 text-[12.5px] text-ink-3">Customize Moki's avatar. Choose Save changes below to keep your changes.</p>
     </div>
     <div className="avatar-stage grid justify-items-center gap-2 px-4 py-6">
       <div className="w-44"><Companion appearance={appearance} mood={mood} paused={paused} /></div>
@@ -64,7 +64,7 @@ export function AppearancePreview({ appearance, onChange }: { appearance: Appear
     </div>
     <div className="flex items-center gap-3 border-t border-line pt-3">
       <div className="w-11 shrink-0"><Companion appearance={{ ...appearance, motion: 'still' }} mood={mood} paused /></div>
-      <p className="text-[12px] text-ink-3">Small-size preview. All appearance choices are saved with this companion. Your Mac's reduced-motion preference takes priority.</p>
+      <p className="text-[12px] text-ink-3">Small-size preview. All appearance choices are saved for Moki. Your Mac's reduced-motion preference takes priority.</p>
     </div>
   </div>;
 }

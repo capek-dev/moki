@@ -4,17 +4,21 @@ A macOS-first, minimal desktop assistant built with Electron, React, and a bundl
 
 ## Current slice
 
-Text chat with DeepSeek and Codex subscription: editable assistant profiles, a per-conversation model picker, streamed replies, Stop, and SQLite-saved history. A small chat window, separate Settings, tray reopen/quit, and optional always-on-top. No workspace setup. Existing local notes are retained as user messages.
+Text chat with DeepSeek and Codex subscription: one Moki with editable instructions, provider, and avatar, a per-conversation model picker, streamed replies, Stop, and SQLite-saved history. A small chat window, separate Settings, tray reopen/quit, and optional always-on-top. No workspace setup. Existing local notes are retained as user messages.
 
 Settings (Cmd+,) now supports DeepSeek API key verification/storage and Codex subscription sign-in. Credentials are encrypted using Electron safeStorage under userData, never returned to the UI. One subscription is stored initially. Codex opens a browser and completes sign-in automatically through a temporary localhost callback on port 1455. The listener binds only to IPv4/IPv6 loopback and closes on completion, cancellation, timeout, or Quit. Sign-in expires after five minutes. If another app is using port 1455, close its sign-in attempt before retrying. Disconnect removes local credentials, it does not revoke the upstream grant.
 
-To chat: connect a provider, select it under Settings > Assistants, start a conversation, select a model, and Send. Model choices come from a curated Jean2 catalog, not a guarantee of subscription availability. No automatic fallback. Codex refreshes expired credentials before a turn; rejected access requires reconnecting rather than replaying a turn. Disconnect removes credentials for future turns; use Stop to abort a running reply.
+To chat: connect a provider, select it under Settings > Moki, start a conversation, select a model, and Send. Model choices come from a curated Jean2 catalog, not a guarantee of subscription availability. No automatic fallback. Codex refreshes expired credentials before a turn; rejected access requires reconnecting rather than replaying a turn. Disconnect removes credentials for future turns; use Stop to abort a running reply.
 
 Replies use Čapek's published model adapters and AI SDK streaming, not the full agent/tool loop yet. **MCP/cua.ai, screenshots, memory, session search, and learning remain unimplemented.** Text-only history displays the latest 100 messages and sends up to 60k characters of recent completed history. The picker lists the latest 100 conversations; older records stay on disk. Replies are limited to three minutes and 64k characters. Interrupted/failed partial replies are saved but not replayed into subsequent model context. No reasoning logs or tool cards.
 
 Automated verification uses offline provider responses; live model access and native UI need manual verification. Codex browser sign-in was confirmed working by the user before this slice.
 
 Provider-focused checks: `bun test tests/provider-connections.test.ts tests/settings-window.test.ts tests/desktop-paths.test.ts` after building.
+
+## Single Moki
+
+Chat and settings expose one Moki, with no companion picker or creation flow. Existing assistant records remain intact for future multi-assistant support. Earlier conversations belonging to other records remain visible in History as read-only; New conversation always uses Moki. Stored custom names and historical attribution are not rewritten. Dynamic memory and skill loading are a future capability, not part of this UI change.
 
 ## Build and open
 

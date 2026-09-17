@@ -2,28 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import type { Assistant, Result, Snapshot } from '../shared/protocol';
 import { ProviderSettings } from './provider-settings';
 import { AppearancePreview } from './appearance-preview';
-import { Companion, INITIAL_APPEARANCE } from './companion';
+import { INITIAL_APPEARANCE } from './companion';
+import { mokiAssistant } from './moki';
 import { TonePicker } from './tone-picker';
 import { useTone } from './tone';
 import { platformClass } from './platform';
 import { Button } from './ui/button';
 import { Segmented } from './ui/segmented';
 import { Panel } from './ui/panel';
-import { Field, Input, Textarea } from './ui/field';
+import { Field, Textarea } from './ui/field';
 import { SimpleSelect } from './ui/select';
 
-const SECTIONS = ['Assistants', 'Appearance', 'Providers', 'Integrations'] as const;
+const SECTIONS = ['Moki', 'Appearance', 'Providers', 'Integrations'] as const;
 const PROVIDER_LABELS = { deepseek: 'DeepSeek', codex: 'Codex subscription' } as const;
 
 export function Settings() {
-  const [section, setSection] = useState<string>('Assistants');
+  const [section, setSection] = useState<string>('Moki');
   const [data, setData] = useState<Snapshot>();
   const [editing, setEditing] = useState<Assistant>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const revision = useRef(0);
   const saving = useRef(false);
-  const { choice, choose } = useTone();
+  const assistant = mokiAssistant(data?.assistants);
+  const draft = editing ?? assistant;
+  const { choice, choose } = useTone(assistant?.appearance?.palette);
   function accept(result: Result) {
     if ((result.revision ?? 0) < revision.current) return;
     revision.current = result.revision ?? 0;
@@ -46,61 +49,42 @@ export function Settings() {
       <Segmented value={section} onChange={setSection} aria-label="Settings sections" options={SECTIONS.map((name) => ({ value: name, label: name }))} />
     </nav>
     <section className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
-      {section === 'Assistants' && <>
-        {editing ? <Panel>
-          <form className="grid gap-4" onSubmit={async (event) => {
-            event.preventDefault();
-            if (saving.current) return;
-            saving.current = true; setBusy(true); setError('');
-            try {
-              accept(await window.moki.request({ method: 'saveAssistant', assistant: editing }));
-              setEditing(undefined);
-            } catch (e) { setError(String(e)); }
-            finally { saving.current = false; setBusy(false); }
-          }}>
-            <h2 className="text-[15px] font-semibold">Your companion</h2>
-            <fieldset className="grid gap-4" disabled={busy}>
-              <Field label="Name" htmlFor="assistant-name">
-                <Input id="assistant-name" required maxLength={80} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-              </Field>
-              <Field label="Provider" htmlFor="assistant-provider">
-                <SimpleSelect
-                  id="assistant-provider"
-                  value={editing.provider}
-                  onValueChange={(provider) => setEditing({ ...editing, provider: provider as Assistant['provider'] })}
-                  options={Object.entries(PROVIDER_LABELS).map(([value, label]) => ({ value, label }))} />
-              </Field>
-              <Field label="How should they help?" htmlFor="assistant-instructions">
-                <Textarea id="assistant-instructions" rows={6} maxLength={16000} value={editing.instructions} onChange={(e) => setEditing({ ...editing, instructions: e.target.value })} />
-              </Field>
-              <AppearancePreview appearance={editing.appearance ?? INITIAL_APPEARANCE} onChange={(appearance) => setEditing({ ...editing, appearance })} />
-              <p className="text-[12px] text-ink-3">Connect your provider in the Providers section. Select the model in each conversation.</p>
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={() => setEditing(undefined)}>Cancel</Button>
-                <Button variant="primary" type="submit" disabled={!editing.name.trim()}>{busy ? 'Saving…' : 'Save companion'}</Button>
-              </div>
-            </fieldset>
-          </form>
-        </Panel> : <div className="grid gap-3">
-          <div>
-            <h2 className="text-[15px] font-semibold">Your companions</h2>
-            <p className="mt-0.5 text-[12.5px] text-ink-3">Give each companion a name, a look, and instructions. Choose who to chat with in the chat window.</p>
-          </div>
-          {data?.assistants.map((assistant) => <Panel key={assistant.id} className="flex items-center gap-3 p-3">
-            <span className="w-10 shrink-0"><Companion appearance={assistant.appearance ?? INITIAL_APPEARANCE} paused /></span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-medium">{assistant.name}</p>
-              <p className="text-[11.5px] text-ink-3">{PROVIDER_LABELS[assistant.provider]}</p>
+      {section === 'Moki' && (draft ? <Panel>
+        <form className="grid gap-4" onSubmit={async (event) => {
+          event.preventDefault();
+          if (saving.current || !editing || editing.id !== assistant?.id) return;
+          saving.current = true; setBusy(true); setError('');
+          try {
+            accept(await window.moki.request({ method: 'saveAssistant', assistant: editing }));
+            setEditing(undefined);
+          } catch (e) { setError(String(e)); }
+          finally { saving.current = false; setBusy(false); }
+        }}>
+          <h2 className="text-[15px] font-semibold">Moki</h2>
+          <fieldset className="grid gap-4" disabled={busy}>
+            <Field label="Provider" htmlFor="assistant-provider">
+              <SimpleSelect
+                id="assistant-provider"
+                value={draft.provider}
+                onValueChange={(provider) => setEditing({ ...draft, provider: provider as Assistant['provider'] })}
+                options={Object.entries(PROVIDER_LABELS).map(([value, label]) => ({ value, label }))} />
+            </Field>
+            <Field label="How should Moki help?" htmlFor="assistant-instructions">
+              <Textarea id="assistant-instructions" rows={6} maxLength={16000} value={draft.instructions} onChange={(e) => setEditing({ ...draft, instructions: e.target.value })} />
+            </Field>
+            <AppearancePreview appearance={draft.appearance ?? INITIAL_APPEARANCE} onChange={(appearance) => setEditing({ ...draft, appearance })} />
+            <p className="text-[12px] text-ink-3">Connect your provider in the Providers section. Select the model in each conversation.</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" disabled={!editing} onClick={() => setEditing(undefined)}>Discard changes</Button>
+              <Button variant="primary" type="submit" disabled={!editing}>{busy ? 'Saving…' : 'Save changes'}</Button>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setEditing({ ...assistant })}>Edit</Button>
-          </Panel>)}
-          <Button variant="secondary" disabled={!data} onClick={() => setEditing({ id: crypto.randomUUID(), name: '', provider: 'deepseek', instructions: '', appearance: { ...INITIAL_APPEARANCE } })}>Add companion</Button>
-        </div>}
-      </>}
+          </fieldset>
+        </form>
+      </Panel> : <p className="text-[13px] text-ink-3">{data ? 'Moki settings are unavailable.' : 'Loading…'}</p>)}
       {section === 'Appearance' && <Panel className="grid max-w-md gap-4">
         <div>
           <h2 className="text-[15px] font-semibold">Appearance</h2>
-          <p className="mt-0.5 text-[12.5px] text-ink-3">Pick the tone of the app. Match avatar follows the companion you chat with, and both windows update live.</p>
+          <p className="mt-0.5 text-[12.5px] text-ink-3">Pick the tone of the app. Match avatar follows Moki's colors, and windows update live.</p>
         </div>
         <TonePicker choice={choice} onChoose={choose} />
       </Panel>}
@@ -108,7 +92,7 @@ export function Settings() {
       {section === 'Integrations' && <div className="grid gap-3">
         <Panel className="grid gap-1.5">
           <h2 className="text-[15px] font-semibold">Integrations</h2>
-          <p className="text-[13px] text-ink-2">MCP connections will be managed here, with access enabled separately for each companion.</p>
+          <p className="text-[13px] text-ink-2">Moki's MCP connections and access permissions will be managed here.</p>
         </Panel>
         <Panel className="grid gap-1.5 opacity-70">
           <h3 className="text-[13px] font-semibold">cua.ai computer use</h3>

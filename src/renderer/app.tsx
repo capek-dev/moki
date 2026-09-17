@@ -7,17 +7,16 @@ import { ChatCompanion } from './chat-companion';
 import { useTone, rememberPalette } from './tone';
 import { platformClass } from './platform';
 import { Button } from './ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SimpleSelect } from './ui/select';
+import { SimpleSelect } from './ui/select';
+import { canChatWithMoki, mokiAssistant } from './moki';
 import { Banner } from './ui/panel';
 import { ArrowUp, Clock, Gear, Plus, Stop, Zap } from './ui/icons';
 
-const PROVIDER_LABELS = { deepseek: 'DeepSeek', codex: 'Codex subscription' } as const;
 const AUTO_THINKING = 'auto';
 
 export function App() {
   const [state, setState] = useState<ChatState>({ revision: 0, histories: {} });
   const data = state.data;
-  const [assistantId, setAssistantId] = useState('moki');
   const [conversationId, setConversationId] = useState<string>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -28,13 +27,14 @@ export function App() {
   const bottom = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const assistant = data?.assistants.find((item) => item.id === assistantId);
-  const conversations = data?.conversations.filter((item) => item.assistantId === assistantId) ?? [];
-  const conversation = conversations.find((item) => item.id === conversationId);
+  const assistant = mokiAssistant(data?.assistants);
+  const conversation = data?.conversations.find((item) => item.id === conversationId);
+  const writable = canChatWithMoki(assistant, conversation);
+  const earlier = !!conversation && !writable;
   const messages = data?.messages.filter((item) => item.conversationId === conversationId) ?? [];
   const running = messages.some((m) => m.status === 'streaming');
   const loaded = !!conversationId && state.histories[conversationId] !== undefined;
-  const draftKey = conversationId ?? `new:${assistantId}`;
+  const draftKey = conversationId ?? `new:${assistant?.id ?? 'moki'}`;
   const draft = drafts[draftKey] ?? '';
   const models = MODELS.filter((item) => item.provider === assistant?.provider);
   const model = conversation?.model ?? (assistant ? defaultModel(assistant.provider) : '');
@@ -42,6 +42,8 @@ export function App() {
   const levels = validModel && assistant ? thinkingLevels(assistant.provider, model) : [];
   const thinking = conversation?.thinking ?? null;
   const appearance = assistant?.appearance ?? INITIAL_APPEARANCE;
+  const author = data?.assistants.find((item) => item.id === conversation?.assistantId);
+  const replyAppearance = earlier ? author?.appearance ?? INITIAL_APPEARANCE : appearance;
   const live = { messages, starting, failed: runtimeFailed || !!error };
   const dataRef = useRef(data); dataRef.current = data;
   useTone(appearance.palette);
@@ -61,8 +63,7 @@ export function App() {
       setState((previous) => ({ ...previous, data: previous.data && { ...previous.data, messages: previous.data.messages.map((m) => m.status === 'streaming' ? { ...m, status: 'interrupted' } : m) } }));
     });
     void perform({ method: 'snapshot' }).then((result) => {
-      const initial = result?.snapshot.assistants[0];
-      if (initial) setAssistantId(initial.id);
+      const initial = mokiAssistant(result?.snapshot.assistants);
       setConversationId(result?.snapshot.conversations.find((item) => item.assistantId === initial?.id)?.id);
     });
     return () => { unsubscribe(); unsubscribeError(); };
@@ -86,7 +87,6 @@ export function App() {
         const { id } = JSON.parse(event.newValue ?? '{}') as { id?: string };
         const picked = dataRef.current?.conversations.find((item) => item.id === id);
         if (!picked) return;
-        setAssistantId(picked.assistantId);
         setConversationId(picked.id);
         setError('');
       } catch { /* Corrupt pick payloads are ignored. */ }
@@ -96,7 +96,7 @@ export function App() {
   }, []);
   async function send(event: FormEvent) {
     event.preventDefault();
-    if (runtimeFailed || !draft.trim() || lock.current || running || !conversationId || !validModel || !loaded) return;
+    if (runtimeFailed || !writable || !draft.trim() || lock.current || running || !conversationId || !validModel || !loaded) return;
     lock.current = true; setBusy(true); setStarting(true); setError('');
     try {
       accept(await window.moki.chat({ conversationId, text: draft, model, thinking }));
@@ -110,42 +110,33 @@ export function App() {
     catch (e) { setError(String(e)); }
   }
   async function newChat() {
-    const result = await perform({ method: 'createConversation', assistantId });
+    if (!assistant) return;
+    const result = await perform({ method: 'createConversation', assistantId: assistant.id });
     if (result) setConversationId(result.conversationId);
   }
   return <main className={`flex h-dvh flex-col ${platformClass ?? ''}`}>
-    {/* Titlebar: one quiet cluster on the traffic-light line. New conversation
-        is the filled accent circle (like Messages' compose); switcher, history,
-        and settings stay quiet beside it. */}
+    {/* The Moki label remains draggable; only the action buttons opt out. */}
     <header className="titlebar flex min-h-12 items-center justify-end gap-1 pr-2.5 pb-2">
-      <Select value={assistantId} disabled={busy || !data} onValueChange={(id) => {
-        setAssistantId(id); setError('');
-        setConversationId(data?.conversations.find((item) => item.assistantId === id)?.id);
-      }}>
-        <SelectTrigger aria-label="Companion" className="h-7 w-auto shrink-0 border-transparent bg-transparent px-2 text-[12.5px] font-medium text-ink-2 hover:border-transparent hover:bg-hover hover:text-ink focus:ring-0">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {data?.assistants.map((item) => <SelectItem key={item.id} value={item.id} hint={PROVIDER_LABELS[item.provider]}>{item.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <Button variant="primary" size="round-sm" aria-label="New conversation" title="New conversation" disabled={busy || !data} onClick={() => void newChat()}><Plus className="h-3 w-3" strokeWidth={1.5} /></Button>
+      <span className="px-2 text-[12.5px] font-medium text-ink-2">Moki</span>
+      <Button variant="ghost" size="icon-sm" aria-label="New conversation" title="New conversation" disabled={busy || !assistant} onClick={() => void newChat()}><Plus /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="History" title="History" disabled={busy} onClick={() => void window.moki.openHistory().catch((e) => setError(String(e)))}><Clock /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="Settings" title="Settings" disabled={busy} onClick={() => void window.moki.openSettings().catch((e) => setError(String(e)))}><Gear /></Button>
     </header>
     {/* Presence zone: the avatar exists on its own, clear of the window-drag
         region and any nested controls, so it can later take click, hold, and
         drag interaction directly. */}
-    <section className="flex justify-center px-4 pb-3" aria-label="Companion">
-      <span className="avatar-stage grid place-items-center rounded-[2rem] p-3">
-        <span className="block w-20"><ChatCompanion appearance={appearance} {...live} /></span>
+    <section className="flex shrink-0 justify-center px-4 pb-1" aria-label="Companion">
+      {/* The SVG already reserves space for accessories and animated moods. */}
+      <span className="avatar-stage block w-24">
+        <ChatCompanion appearance={appearance} {...live} />
       </span>
     </section>
     <section className="min-h-0 flex-1 overflow-y-auto px-4 pb-4" aria-label="Conversation" onScroll={(e) => { const el = e.currentTarget; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; }}>
-      {!messages.length && <div className="mx-auto grid max-w-64 justify-items-center gap-3 pt-4 text-center">
-        <p className="text-[15px] leading-snug font-semibold">What can {assistant?.name ?? 'your companion'} help with?</p>
+      {earlier && <p className="mb-4 rounded-xl border border-line px-3 py-2 text-[12px] text-ink-2">Earlier conversation with {author?.name ?? 'a previous companion'}. Read-only. Start a new conversation to chat with Moki.</p>}
+      {!messages.length && !earlier && <div className="mx-auto grid max-w-64 justify-items-center gap-3 pt-4 text-center">
+        <p className="text-[15px] leading-snug font-semibold">What can Moki help with?</p>
         {!conversationId && <>
-          <Button variant="primary" size="sm" disabled={busy || !data} onClick={() => void newChat()}>Start a conversation</Button>
+          <Button variant="primary" size="sm" disabled={busy || !assistant} onClick={() => void newChat()}>Start a conversation</Button>
           <p className="text-[12px] text-ink-3">Connect a provider in Settings, pick a model below, and chat.</p>
         </>}
       </div>}
@@ -153,8 +144,9 @@ export function App() {
       <div className="grid gap-5">
         {messages.map((message) => message.role === 'assistant'
           ? <article key={message.id} className="flex gap-2.5">
-            <span className="mt-0.5 w-5 shrink-0">{message.status === 'streaming' ? <ChatCompanion appearance={appearance} messages={[message]} starting={false} failed={false} /> : <Companion appearance={appearance} paused />}</span>
+            <span className="mt-0.5 w-5 shrink-0">{message.status === 'streaming' ? <ChatCompanion appearance={replyAppearance} messages={[message]} starting={false} failed={false} /> : <Companion appearance={replyAppearance} paused />}</span>
             <div className="grid min-w-0 flex-1 gap-1.5 self-start">
+              {earlier && message.assistantName && <p className="text-[11px] text-ink-3">{message.assistantName}</p>}
               {message.text
                 ? <p className="message-text text-[13.5px] leading-relaxed text-ink">{message.text}{message.status === 'interrupted' && <span className="ml-1.5 text-[11px] text-ink-3">stopped</span>}</p>
                 : message.status === 'streaming' && <p className="text-[13.5px] text-ink-3">Thinking…</p>}
@@ -180,16 +172,16 @@ export function App() {
         <textarea
           id="message"
           ref={composer}
-          placeholder={conversationId ? 'Message' : 'Start a conversation first'}
+          placeholder={earlier ? 'Earlier conversation (read-only)' : conversationId ? 'Message Moki' : 'Start a conversation first'}
           rows={1}
           maxLength={16000}
-          disabled={busy || !conversationId}
+          disabled={busy || !writable}
           value={draft}
           onChange={(e) => setDrafts({ ...drafts, [draftKey]: e.target.value })}
           className="block max-h-40 w-full resize-none bg-transparent px-3 pt-2 pb-1 text-[13.5px] leading-relaxed text-ink placeholder:text-ink-3 focus:outline-none disabled:opacity-50" />
         <div className="flex items-center justify-between gap-2 px-1 pb-0.5">
           <div className="flex min-w-0 items-center">
-            {conversationId && <>
+            {conversationId && writable && <>
               <SimpleSelect
                 compact
                 aria-label="Model"
@@ -209,7 +201,7 @@ export function App() {
           </div>
           {running || starting
             ? <Button variant="secondary" size="round" aria-label="Stop" title="Stop" onClick={() => void stop()}><Stop /></Button>
-            : <Button variant="primary" size="round" aria-label="Send message" title="Send" disabled={runtimeFailed || busy || !draft.trim() || !loaded || !validModel} type="submit"><ArrowUp /></Button>}
+            : <Button variant="primary" size="round" aria-label="Send message" title="Send" disabled={runtimeFailed || busy || !writable || !draft.trim() || !loaded || !validModel} type="submit"><ArrowUp /></Button>}
         </div>
       </div>
     </form>

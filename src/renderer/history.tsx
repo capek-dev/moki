@@ -3,6 +3,7 @@ import type { Result, Snapshot } from '../shared/protocol';
 import { Companion, INITIAL_APPEARANCE } from './companion';
 import { useTone } from './tone';
 import { platformClass } from './platform';
+import { canChatWithMoki, mokiAssistant } from './moki';
 
 // Sessions live in their own window: picking one tells the chat window through
 // the storage event (same cross-window channel the tone uses), then closes.
@@ -31,6 +32,7 @@ export function History() {
     window.close();
   }
   const conversations = data?.conversations ?? [];
+  const moki = mokiAssistant(data?.assistants);
   return <main className={`flex h-dvh flex-col ${platformClass ?? ''}`}>
     <header className="titlebar flex min-h-12 items-end pb-2">
       <h1 className="pl-1 text-[13px] font-semibold tracking-[.02em] text-ink">History</h1>
@@ -46,7 +48,7 @@ export function History() {
           <span className="w-8 shrink-0"><Companion appearance={assistant?.appearance ?? INITIAL_APPEARANCE} paused /></span>
           <span className="grid min-w-0 flex-1">
             <span className="truncate text-[13px] font-medium text-ink">{conversation.title}</span>
-            <span className="text-[11.5px] text-ink-3">{assistant?.name ?? 'Companion'}</span>
+            <span className="text-[11.5px] text-ink-3">{canChatWithMoki(moki, conversation) ? 'Moki' : `Earlier conversation · ${assistant?.name ?? 'Previous companion'} · Read-only`}</span>
           </span>
         </button>;
       })}
