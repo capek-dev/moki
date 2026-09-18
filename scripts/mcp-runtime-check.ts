@@ -62,12 +62,39 @@ const child = spawn('./dist/backend/moki-runtime', [], {
 });
 let out = '';
 let err = '';
-child.stdout.setEncoding('utf8').on('data', (chunk) => { out += chunk; });
-child.stderr.setEncoding('utf8').on('data', (chunk) => { err += chunk; });
+// Responses are collected as they stream so the driver can sequence phases:
+// the pre-auth snapshot (id 1) must be fully answered before the sign-in push
+// lands, otherwise a slow spawn lets the push race ahead of the assertion.
+const responses = new Map<string, { id?: string; result?: { mcp?: unknown }; error?: string }>();
+const waiters: ((id: string) => void)[] = [];
+let lineBuffer = '';
+child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+  out += chunk; lineBuffer += chunk;
+  let nl: number;
+  while ((nl = lineBuffer.indexOf('\n')) >= 0) {
+    const line = lineBuffer.slice(0, nl).trim();
+    lineBuffer = lineBuffer.slice(nl + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (typeof message.id === 'string') {
+      responses.set(message.id, message);
+      for (const waiter of waiters.splice(0)) waiter(message.id);
+    }
+  }
+});
+const waitFor = (id: string) => new Promise<void>((resolve) => { if (responses.has(id)) resolve(); else waiters.push(() => resolve()); });
+child.stderr.setEncoding('utf8').on('data', (chunk: string) => { err += chunk; });
 const started = Date.now();
-child.stdin.write(requests.map((request) => JSON.stringify(request)).join('\n') + '\n');
+// Sequenced like the real UI: each request is answered before the next is
+// sent, so toggles and removes never invalidate an earlier request's
+// in-flight fetch (the generation guard treats those worlds as changed).
+for (const request of requests) {
+  child.stdin.write(JSON.stringify(request) + '\n');
+  await waitFor(request.id);
+}
 child.stdin.write(JSON.stringify(push) + '\n');
 child.stdin.write(JSON.stringify(afterAuth) + '\n');
+await waitFor('10');
 child.stdin.end();
 const exitCode = await new Promise<number>((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error('runtime did not exit within 20s')), 20000);
@@ -75,7 +102,6 @@ const exitCode = await new Promise<number>((resolve, reject) => {
 });
 guarded.stop(true);
 const lines = out.trim().split('\n').filter(Boolean);
-const responses = new Map(lines.map((line) => { const message = JSON.parse(line); return [message.id, message]; }));
 const catalog = responses.get('1')?.result?.mcp as { servers?: { name: string; connected?: boolean; needsAuth?: boolean; tools?: { name: string }[]; error?: string | null }[] } | undefined;
 const notes = catalog?.servers?.find((server) => server.name === 'notes');
 const ghost = catalog?.servers?.find((server) => server.name === 'ghost');

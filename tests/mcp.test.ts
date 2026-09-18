@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FAKE_SERVER_SOURCE, Mcp, mergeToolbags } from '@backend/mcp';
 import type { Toolbag } from '@backend/cua';
+import { Store } from '@backend/store';
 import { describeMcpCall, mcpToolLabel } from '@shared/mcp';
 import { parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix } from '@shared/mcp';
 
@@ -23,13 +24,14 @@ function fakeServerConfig(extra: Record<string, unknown> = {}) {
 // response shapes are exercised. Records the headers it saw per request.
 function httpFake() {
   const seen: { session: string | null; auth: string | null }[] = [];
+  let inits = 0;
   const server = Bun.serve({
     port: 0,
     fetch: async (request) => {
       if (request.method !== 'POST') return new Response('noop', { status: 202 });
       const message = await request.json() as { id?: unknown; method?: string; params?: { name?: string } };
       seen.push({ session: request.headers.get('mcp-session-id'), auth: request.headers.get('authorization') });
-      if (message.method === 'initialize') return Response.json({ jsonrpc: '2.0', id: message.id, result: { serverInfo: { name: 'web', version: '1' } } }, { headers: { 'mcp-session-id': 'sess-7' } });
+      if (message.method === 'initialize') { inits++; return Response.json({ jsonrpc: '2.0', id: message.id, result: { serverInfo: { name: 'web', version: '1' } } }, { headers: { 'mcp-session-id': 'sess-7' } }); }
       if (message.method === 'tools/list') return Response.json({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'search_web', description: 'Search the web.' }] } });
       if (message.method === 'tools/call') {
         const frame = `event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: `web-called:${message.params?.name}` }] } })}\n\n`;
@@ -38,7 +40,7 @@ function httpFake() {
       return Response.json({ jsonrpc: '2.0', id: message.id, error: { message: 'unsupported' } });
     },
   });
-  return { url: `http://localhost:${server.port}`, seen, stop: () => server.stop(true) };
+  return { url: `http://localhost:${server.port}`, seen, inits: () => inits, stop: () => server.stop(true) };
 }
 
 test('server keys become safe prefixes', () => {
@@ -339,4 +341,114 @@ test('addServer writes the config, rejects bad input, and removeServer deletes',
     expect(JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).servers).toEqual({});
     expect(() => mcp.removeServer('notes')).toThrow('Connection not found.');
   } finally { cleanup(); }
+});
+
+test('store catalog rows roundtrip on fetch and prune with the config', async () => {
+  const { dir, cleanup } = freshDir();
+  const store = new Store(join(dir, 'moki.sqlite'));
+  const web = httpFake();
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { web: { transport: 'http', url: web.url } } }));
+    await new Mcp(dir, store).tools();
+    expect(JSON.parse(store.mcpCatalog('web')!).tools).toHaveLength(1); // success persisted
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: {} }));
+    await new Mcp(dir, store).tools(); // empty config prunes the orphaned row
+    expect(store.mcpCatalog('web')).toBeNull();
+  } finally { web.stop(); store.close(); cleanup(); }
+});
+
+test('warm turns skip the round trip; explicit tools() refreshes; cache survives restarts', async () => {
+  const { dir, cleanup } = freshDir();
+  const store = new Store(join(dir, 'moki.sqlite'));
+  const web = httpFake();
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { web: { transport: 'http', url: web.url } } }));
+    await new Mcp(dir, store).tools();          // fetch 1, persisted
+    expect(web.inits()).toBe(1);
+    const bag = await new Mcp(dir, store).toolbag(); // fresh instance, shared store: restart-shaped
+    expect(bag.tools.map((tool) => tool.name)).toEqual(['web__search_web']); // served warm
+    expect(web.inits()).toBe(1);                // no round trip for the turn
+    bag.close();
+    await new Mcp(dir, store).tools();          // Settings-style refresh
+    expect(web.inits()).toBe(2);
+  } finally { web.stop(); store.close(); cleanup(); }
+});
+
+test('failing servers degrade to their last known catalog, marked stale', async () => {
+  const { dir, cleanup } = freshDir();
+  const store = new Store(join(dir, 'moki.sqlite'));
+  let broken = false;
+  const flaky = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      if (broken) return new Response('down', { status: 500 });
+      const message = await request.json() as { id?: unknown; method?: string };
+      if (message.method === 'initialize') return Response.json({ jsonrpc: '2.0', id: message.id, result: { serverInfo: { name: 'flaky' } } });
+      if (message.method === 'tools/list') return Response.json({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'search_web', description: 'Search.' }] } });
+      return Response.json({ jsonrpc: '2.0', id: message.id, error: { message: 'unsupported' } });
+    },
+  });
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { flaky: { transport: 'http', url: `http://localhost:${flaky.port}` } } }));
+    const mcp = new Mcp(dir, store);
+    const healthy = await mcp.tools();
+    expect(healthy.servers[0]).toMatchObject({ connected: true, stale: false });
+    broken = true;
+    const degraded = await mcp.tools();      // live fetch fails; last known serves
+    expect(degraded.servers[0]).toMatchObject({ connected: true, stale: true });
+    expect(degraded.servers[0].tools.map((tool) => tool.name)).toEqual(['flaky__search_web']);
+    expect(degraded.servers[0].error).toBeNull();
+    const bag = await mcp.toolbag();          // degraded entries stay warm for the TTL window
+    expect(bag.tools.map((tool) => tool.name)).toEqual(['flaky__search_web']);
+    bag.close();
+    // The good durable entry was never overwritten by the failure: a fresh
+    // instance (restart-shaped) still degrades to real tools, not emptiness.
+    const state2 = await new Mcp(dir, store).tools();
+    expect(state2.servers[0]).toMatchObject({ connected: true, stale: true });
+    expect(state2.servers[0].tools.map((tool) => tool.name)).toEqual(['flaky__search_web']);
+  } finally { flaky.stop(true); store.close(); cleanup(); }
+});
+
+test('auth-header changes invalidate the cache; identical pushes do not', async () => {
+  const { dir, cleanup } = freshDir();
+  const store = new Store(join(dir, 'moki.sqlite'));
+  let inits = 0;
+  const guarded = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      if (request.method !== 'POST') return new Response('denied', { status: 401 });
+      const message = await request.json() as { id?: unknown; method?: string };
+      const authed = request.headers.get('authorization') === 'Bearer tok';
+      if (message.method === 'initialize') {
+        inits++; // every attempt counts, authenticated or not
+        if (!authed) return new Response('denied', { status: 401 });
+        return Response.json({ jsonrpc: '2.0', id: message.id, result: { serverInfo: { name: 'guarded' } } });
+      }
+      if (!authed) return new Response('denied', { status: 401 });
+      if (message.method === 'tools/list') return Response.json({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'search_web', description: 'Search.' }] } });
+      return Response.json({ jsonrpc: '2.0', id: message.id, error: { message: 'unsupported' } });
+    },
+  });
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { guarded: { transport: 'http', url: `http://localhost:${guarded.port}` } } }));
+    const mcp = new Mcp(dir, store);
+    await mcp.tools();                         // needsAuth; never persisted
+    expect(inits).toBe(1);
+    expect(store.mcpCatalog('guarded')).toBeNull();
+    mcp.setAuthHeaders('guarded', { authorization: 'Bearer tok' }); // sign-in: change → invalidate
+    let bag = await mcp.toolbag();             // refetch succeeds and persists
+    expect(bag.tools.map((tool) => tool.name)).toEqual(['guarded__search_web']);
+    expect(inits).toBe(2);
+    bag.close();
+    mcp.setAuthHeaders('guarded', { authorization: 'Bearer tok' }); // identical push: no wipe
+    bag = await mcp.toolbag();
+    expect(bag.tools.length).toBe(1);
+    expect(inits).toBe(2);                     // served warm
+    bag.close();
+    mcp.setAuthHeaders('guarded', null);       // sign-out: invalidate and refetch
+    bag = await mcp.toolbag();
+    expect(bag.tools).toEqual([]);
+    expect(inits).toBe(3);
+    bag.close();
+  } finally { guarded.stop(true); store.close(); cleanup(); }
 });

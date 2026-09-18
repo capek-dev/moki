@@ -280,7 +280,7 @@ function ServerCard({ server, pending, signingIn, mcpBusy, onSetServer, onToggle
 }) {
   const status = !server.enabled ? 'Off'
     : signingIn === server.name ? 'Waiting for you to finish signing in…'
-    : server.connected ? `Connected · ${server.tools.length} tools`
+    : server.connected ? `Connected · ${server.tools.length} tools${server.stale ? ' · last known' : ''}`
     : server.needsAuth ? 'Sign in required'
     : server.error ? 'Not connected'
     : 'Connecting…';
@@ -295,6 +295,7 @@ function ServerCard({ server, pending, signingIn, mcpBusy, onSetServer, onToggle
       <button type="button" onClick={() => void onRetry()} disabled={mcpBusy || !!pending} className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11.5px] text-ink-3 transition-colors hover:text-ink disabled:pointer-events-none disabled:opacity-45">Retry</button>
     </div>
   </div>;
+  const staleNote = server.enabled && server.connected && server.stale && <p className="text-[12px] text-ink-3">This connection could not be reached just now. Moki is using its last known actions.</p>;
   return <ConnectionCard
     name={server.name}
     status={status}
@@ -312,6 +313,6 @@ function ServerCard({ server, pending, signingIn, mcpBusy, onSetServer, onToggle
       {server.transport === 'http' && server.signedIn && server.enabled && <button type="button" onClick={() => void onSignOut(server.name)} disabled={!!pending} className="cursor-pointer rounded-md px-1.5 py-1 text-[11.5px] text-ink-3 transition-colors hover:text-ink disabled:pointer-events-none disabled:opacity-45">Sign out</button>}
       <button type="button" onClick={() => void onRemove(server.name)} disabled={!!pending} aria-label={`Remove ${server.name}`} className="cursor-pointer rounded-md px-1.5 py-1 text-[11.5px] text-ink-3 transition-colors hover:text-danger disabled:pointer-events-none disabled:opacity-45">Remove</button>
     </>}
-    note={<>{needsAuthNote}{errorNote}</>}
+    note={<>{needsAuthNote}{errorNote}{staleNote}</>}
   />;
 }

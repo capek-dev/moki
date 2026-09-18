@@ -4,15 +4,18 @@ import { join } from 'node:path';
 import { diagnosticConfig, parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix, TOOL_NAME_MAX, type McpServerConfig, type ParsedMcpConfig } from '@shared/mcp';
 import type { McpServerState, McpState } from '@shared/protocol';
 import { parseToolCallResult, type AgentToolDef, type Toolbag } from '@backend/cua';
+import type { Store } from '@backend/store';
 
 // User-added MCP servers. Slice 1: config file ownership plus stdio catalogs
 // (spawn -> initialize -> tools/list -> close, one short-lived connection per
 // fetch, mirroring the Cua transport). Slice 2: per-turn toolbags that execute
 // tools/call through lazily spawned per-server sessions. Slice 3: Streamable
 // HTTP connections (web servers such as Pipedream) plus add/remove from the
-// UI. The config file is the source of truth and is re-read on every fetch,
-// so hand edits while Moki runs are picked up. Toggles write the file back
-// atomically and answer from the cached catalog without a new spawn.
+// UI. Plan 18 slice 2: catalogs are cached durably (SQLite) with a TTL, chat
+// turns skip the round trip while warm, and failing servers degrade to their
+// last known catalog instead of emptying the toolset. The config file is the
+// source of truth and is re-read on every fetch, so hand edits while Moki
+// runs are picked up.
 
 const PROTOCOL_VERSION = '2024-11-05';
 const CLIENT_INFO = { name: 'moki', version: '0.1.0' };
@@ -26,6 +29,10 @@ const SCHEMA_LIMIT = 8192;
 // App actions can be slower than catalog reads (searches, writes); still well
 // inside the ten-minute tool-turn deadline. Matches the Cua call bound.
 const CALL_TIMEOUT_MS = 45000;
+// How long a fetched catalog stays warm for chat turns (plan 18). There is no
+// timer-based background refresh on purpose: the next Settings open or the
+// first post-TTL toolbag refreshes, which keeps the runtime idle-free.
+const CATALOG_FRESH_MS = 5 * 60_000;
 
 // A tool as fetched from one server. `exposed` is the model-facing prefixed
 // name; `original` is what the server expects in tools/call (slice 2).
@@ -34,6 +41,10 @@ export interface McpCatalogTool { exposed: string; original: string; description
 // Thrown by HTTP connections on 401/403 so catalog fetches can surface a
 // "sign in required" state instead of a generic error.
 export class AuthRequiredError extends Error {}
+
+// One server's fetched catalog plus cache metadata. `stale` marks a degraded
+// entry: the live fetch failed and the last known tools are being served.
+interface CatalogEntry { tools: McpCatalogTool[]; error: string | null; needsAuth?: boolean; stale?: boolean; fetchedAt: number }
 
 // The transport contract both connection kinds satisfy: one JSON-RPC request
 // at a time with a timeout, plus fire-and-forget notifications and teardown.
@@ -245,18 +256,105 @@ export class Mcp {
   // Last successfully parsed file contents, kept for write-back so unknown
   // fields hand-editors added survive UI-driven toggles.
   private rawCache: unknown;
-  private catalogs = new Map<string, { tools: McpCatalogTool[]; error: string | null; needsAuth?: boolean }>();
+  private catalogs = new Map<string, CatalogEntry>();
+  // One shared in-flight fetch per server, so overlapping turns and Settings
+  // requests never double-spawn or double-hit the same server.
+  private fetching = new Map<string, Promise<CatalogEntry>>();
+  // Bumped whenever a server's world changes (auth headers, disable, remove).
+  // A fetch that started before the change must not repopulate the cache
+  // after it: its result is stale the moment it lands.
+  private generations = new Map<string, number>();
   // Bearer headers pushed from Electron main after a UI sign-in; never written
   // to the config file or disk.
   private authHeaders = new Map<string, Record<string, string>>();
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, private store?: Store) {
     this.configPath = join(dataDir, 'mcp.json');
   }
 
   setAuthHeaders(server: string, headers: Record<string, string> | null) {
-    if (headers) this.authHeaders.set(server, headers);
+    const current = this.authHeaders.get(server);
+    const next = headers ?? undefined;
+    if (current !== undefined && next !== undefined
+      && JSON.stringify(Object.entries(current).sort()) === JSON.stringify(Object.entries(next).sort())) return; // identical push (e.g. app-start restore)
+    if (next) this.authHeaders.set(server, next);
     else this.authHeaders.delete(server);
+    // A changed or removed credential changes what the server will report;
+    // drop every cached answer so the next fetch re-evaluates. The first push
+    // at app start (no previous value) never wipes the durable cache.
+    this.catalogs.delete(server);
+    this.fetching.delete(server);
+    this.bump(server);
+    if (current !== undefined) this.storeDrop(server);
+  }
+
+  private bump(key: string) { this.generations.set(key, (this.generations.get(key) ?? 0) + 1); }
+
+  // Best-effort durable-cache plumbing; a missing store (unit fixtures) or a
+  // failed write must never break a fetch or a chat turn.
+  private storeCatalog(key: string): string | null { try { return this.store?.mcpCatalog(key) ?? null; } catch { return null; } }
+  private storeSave(key: string, entry: CatalogEntry) { try { this.store?.setMcpCatalog(key, JSON.stringify(entry)); } catch { /* best-effort */ } }
+  private storeDrop(key: string) { try { this.store?.deleteMcpCatalog(key); } catch { /* best-effort */ } }
+  private storePrune(known: string[]) { try { this.store?.pruneMcpCatalogs(known); } catch { /* best-effort */ } }
+
+  // Memory first, then the durable store (hydrating memory so the next read
+  // is free). Unknown shapes are treated as absent; the next fetch overwrites.
+  private cached(key: string): CatalogEntry | null {
+    const memory = this.catalogs.get(key);
+    if (memory) return memory;
+    const raw = this.storeCatalog(key);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Partial<CatalogEntry>;
+      if (!parsed || !Array.isArray(parsed.tools) || typeof parsed.fetchedAt !== 'number') return null;
+      const entry: CatalogEntry = {
+        tools: parsed.tools.filter((tool) => tool && typeof tool.exposed === 'string' && typeof tool.original === 'string'),
+        error: typeof parsed.error === 'string' ? parsed.error : null,
+        needsAuth: parsed.needsAuth === true,
+        stale: false,
+        fetchedAt: parsed.fetchedAt,
+      };
+      this.catalogs.set(key, entry);
+      return entry;
+    } catch { return null; }
+  }
+
+  // The shared fetch: deduplicated per server, remembered in memory, and
+  // persisted on success only (failures and sign-out results never overwrite
+  // a good durable entry, so degrade keeps working across restarts).
+  private loadCatalog(key: string, config: McpServerConfig): Promise<CatalogEntry> {
+    const existing = this.fetching.get(key);
+    if (existing) return existing;
+    const generation = this.generations.get(key) ?? 0;
+    const task = this.fetchCatalog(key, config).then((result) => {
+      const entry: CatalogEntry = { ...result, stale: false, fetchedAt: Date.now() };
+      // The server's world changed while this fetch was in the air (sign-in,
+      // sign-out, disable, remove): hand the result to the awaiting caller but
+      // never remember it, or a stale anonymous fetch would overwrite a fresh
+      // signed-in catalog.
+      if ((this.generations.get(key) ?? 0) !== generation) return entry;
+      this.catalogs.set(key, entry);
+      if (!entry.error) this.storeSave(key, entry);
+      return entry;
+    }).finally(() => { this.fetching.delete(key); });
+    this.fetching.set(key, task);
+    return task;
+  }
+
+  // The plan-18 degrade rule: always try the live server first; when it fails
+  // and a previous catalog exists, serve the last known tools instead of
+  // emptying the toolset, marked stale. Sign-out results are never degraded:
+  // no credential means no tools.
+  private async refreshOrDegrade(key: string, config: McpServerConfig): Promise<CatalogEntry> {
+    const previous = this.cached(key);
+    const fresh = await this.loadCatalog(key, config);
+    if (!fresh.error || fresh.needsAuth) return fresh;
+    if (previous && !previous.needsAuth && previous.tools.length) {
+      const degraded: CatalogEntry = { tools: previous.tools, error: null, needsAuth: false, stale: true, fetchedAt: Date.now() };
+      this.catalogs.set(key, degraded);
+      return degraded;
+    }
+    return fresh;
   }
 
   private read(): ParsedMcpConfig {
@@ -329,10 +427,10 @@ export class Mcp {
   private buildState(parsed: ParsedMcpConfig): McpState {
     const assigned = this.assign(parsed);
     const servers = parsed.servers.map(({ key, config }) => {
-      if (!config.enabled) return { name: key, transport: config.transport, enabled: false, connected: false, tools: [], disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: false } satisfies McpServerState;
+      if (!config.enabled) return { name: key, transport: config.transport, enabled: false, connected: false, tools: [], disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: false, stale: false } satisfies McpServerState;
       const catalog = this.catalogs.get(key);
-      if (!catalog || catalog.error) return { name: key, transport: config.transport, enabled: true, connected: false, tools: [], disabledTools: config.disabledTools, error: catalog?.error ?? null, needsAuth: catalog?.needsAuth === true, signedIn: config.transport === 'http' && this.authHeaders.has(key) } satisfies McpServerState;
-      return { name: key, transport: config.transport, enabled: true, connected: true, tools: (assigned.get(key) ?? []).map(({ exposed, description }) => ({ name: exposed, description })), disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: config.transport === 'http' && this.authHeaders.has(key) } satisfies McpServerState;
+      if (!catalog || catalog.error) return { name: key, transport: config.transport, enabled: true, connected: false, tools: [], disabledTools: config.disabledTools, error: catalog?.error ?? null, needsAuth: catalog?.needsAuth === true, signedIn: config.transport === 'http' && this.authHeaders.has(key), stale: false } satisfies McpServerState;
+      return { name: key, transport: config.transport, enabled: true, connected: true, tools: (assigned.get(key) ?? []).map(({ exposed, description }) => ({ name: exposed, description })), disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: config.transport === 'http' && this.authHeaders.has(key), stale: catalog.stale === true } satisfies McpServerState;
     });
     return { servers, diagnostics: parsed.diagnostics };
   }
@@ -356,11 +454,14 @@ export class Mcp {
     return assigned;
   }
 
+  // Settings-style explicit fetch: every active server is contacted live
+  // (write-through to the durable cache), with the degrade rule as the safety
+  // net; orphaned cache rows for servers removed from the file are pruned.
   async tools(): Promise<McpState> {
     const parsed = this.read();
+    this.storePrune(parsed.servers.map((server) => server.key));
     const active = parsed.servers.filter(({ config }) => config.enabled);
-    const fetched = await Promise.all(active.map(async ({ key, config }) => [key, await this.fetchCatalog(key, config)] as const));
-    for (const [key, catalog] of fetched) this.catalogs.set(key, catalog);
+    await Promise.all(active.map(async ({ key, config }) => { await this.refreshOrDegrade(key, config); }));
     return this.buildState(parsed);
   }
 
@@ -374,7 +475,7 @@ export class Mcp {
       if (entry && typeof entry === 'object' && !Array.isArray(entry)) (entry as Record<string, unknown>).enabled = enabled;
       else servers[key] = { enabled };
     });
-    if (!enabled) this.catalogs.delete(key);
+    if (!enabled) this.catalogs.delete(key); // buildState never reads catalogs for disabled servers; the delete is enough
     return this.buildState({ servers: parsed.servers.map((entry) => entry.key === key ? { key, config: { ...entry.config, enabled } } : entry), diagnostics: parsed.diagnostics });
   }
 
@@ -424,18 +525,24 @@ export class Mcp {
     if (!parsed.servers.some((server) => server.key === key)) throw new Error('Connection not found.');
     this.write((servers) => { delete servers[key]; });
     this.catalogs.delete(key);
+    this.bump(key);
+    this.storeDrop(key);
     return this.buildState({ servers: parsed.servers.filter((server) => server.key !== key), diagnostics: parsed.diagnostics });
   }
 
   // Everything the agent gets for one turn: catalogs minus disabled tools,
   // with per-server sessions spawned lazily on first use and all closed by
-  // close() — the same lifecycle contract the Cua toolbag follows. A server
-  // that cannot be fetched contributes zero tools instead of failing the turn.
+  // close() — the same lifecycle contract the Cua toolbag follows. Catalogs
+  // fetched within the TTL skip the round trip entirely (plan 18's cache), so
+  // warm turns spawn nothing before the model starts replying. A failing
+  // server contributes its last known tools, or zero when nothing is known.
   async toolbag(_signal?: AbortSignal): Promise<Toolbag> {
     const parsed = this.read();
     const active = parsed.servers.filter(({ config }) => config.enabled);
     await Promise.all(active.map(async ({ key, config }) => {
-      this.catalogs.set(key, await this.fetchCatalog(key, config));
+      const entry = this.cached(key);
+      if (entry && !entry.error && Date.now() - entry.fetchedAt < CATALOG_FRESH_MS) return; // warm: no round trip
+      await this.refreshOrDegrade(key, config);
     }));
     const assigned = this.assign(parsed);
     const byKey = new Map(parsed.servers.map((server) => [server.key, server]));

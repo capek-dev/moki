@@ -42,7 +42,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, messageId TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, mime TEXT NOT NULL, byteSize INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, storageName TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS cua_disabled_tools (name TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS cua_integration (id INTEGER PRIMARY KEY CHECK (id = 0), enabled INTEGER NOT NULL);
-      INSERT OR IGNORE INTO cua_integration (id, enabled) VALUES (0, 1);`);
+      INSERT OR IGNORE INTO cua_integration (id, enabled) VALUES (0, 1);
+      CREATE TABLE IF NOT EXISTS mcp_catalogs (server TEXT PRIMARY KEY, catalog TEXT NOT NULL, fetchedAt INTEGER NOT NULL);`);
     this.db.transaction(() => {
       const add = (table: string, name: string, definition: string) => {
         const columns = this.db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
@@ -106,6 +107,24 @@ export class Store {
     const keep = new Set(known);
     const stale = this.db.query<{ name: string }, []>('SELECT name FROM cua_disabled_tools').all().filter((row) => !keep.has(row.name)).map((row) => row.name);
     if (stale.length) this.db.query(`DELETE FROM cua_disabled_tools WHERE name IN (${stale.map(() => '?').join(',')})`).run(...stale);
+  }
+  // Durable catalog cache for user-added MCP connections (plan 18): opaque
+  // JSON blobs owned by the Mcp class; the store stays schema-dumb on purpose
+  // so cache-shape changes never need a migration.
+  mcpCatalog(server: string): string | null {
+    const row = this.db.query<{ catalog: string }, [string]>('SELECT catalog FROM mcp_catalogs WHERE server = ?').get(text(server, 64));
+    return row?.catalog ?? null;
+  }
+  setMcpCatalog(server: string, catalog: string) {
+    this.db.query('INSERT INTO mcp_catalogs (server, catalog, fetchedAt) VALUES (?, ?, ?) ON CONFLICT(server) DO UPDATE SET catalog = excluded.catalog, fetchedAt = excluded.fetchedAt').run(text(server, 64), catalog, Date.now());
+  }
+  deleteMcpCatalog(server: string) {
+    this.db.query('DELETE FROM mcp_catalogs WHERE server = ?').run(text(server, 64));
+  }
+  pruneMcpCatalogs(known: readonly string[]) {
+    const keep = new Set(known);
+    const stale = this.db.query<{ server: string }, []>('SELECT server FROM mcp_catalogs').all().filter((row) => !keep.has(row.server)).map((row) => row.server);
+    if (stale.length) this.db.query(`DELETE FROM mcp_catalogs WHERE server IN (${stale.map(() => '?').join(',')})`).run(...stale);
   }
   snapshot(conversationId?: string): Snapshot {
     // History reads are bounded. Older messages and their attachments remain on disk.

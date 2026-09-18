@@ -27,7 +27,7 @@ const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ 
   return mergeToolbags(bags);
 });
 const cua = new Cua(store, mcpTransport());
-const mcp = new Mcp(dataDir);
+const mcp = new Mcp(dataDir, store);
 // Catalog fetches spawn a short-lived MCP transport, so these complete async;
 // responses carry their request id and the runtime matches them in any order.
 async function handleCua(id: string, request: { method: 'cuaTools' } | { method: 'cuaSetTool'; tool: unknown; disabled: unknown } | { method: 'cuaSetEnabled'; enabled: unknown }) {
