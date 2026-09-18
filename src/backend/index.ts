@@ -38,8 +38,11 @@ async function handleCua(id: string, request: { method: 'cuaTools' } | { method:
 }
 // Same async shape for user-added MCP servers; config reads/writes and stdio
 // catalog fetches never block the pipe.
-async function handleMcp(id: string, request: { method: 'mcpTools' } | { method: 'mcpSetServer'; server: unknown; enabled: unknown } | { method: 'mcpSetTool'; server: unknown; tool: unknown; disabled: unknown }) {
+async function handleMcp(id: string, request: { method: 'mcpTools' } | { method: 'mcpAddServer'; name: unknown; kind: unknown; command?: unknown; url?: unknown } | { method: 'mcpRemoveServer'; server: unknown } | { method: 'mcpSetServer'; server: unknown; enabled: unknown } | { method: 'mcpSetTool'; server: unknown; tool: unknown; disabled: unknown }) {
+  // Adding fetches fresh state so the new connection's catalog shows up too.
   const state = request.method === 'mcpTools' ? await mcp.tools()
+    : request.method === 'mcpAddServer' ? (mcp.addServer(request), await mcp.tools())
+    : request.method === 'mcpRemoveServer' ? mcp.removeServer(request.server)
     : request.method === 'mcpSetServer' ? mcp.setServer(request.server, request.enabled)
     : mcp.setTool(request.server, request.tool, request.disabled);
   console.log(JSON.stringify({ id, result: stamp({ snapshot: store.snapshot(), mcp: state }) }));
@@ -53,6 +56,13 @@ lines.on('line', (line) => {
     if (Buffer.byteLength(line) > 128 * 1024) throw new Error('Request too large.');
     const envelope = JSON.parse(line);
     id = envelope?.id;
+    // Push events from Electron main (sign-in header overlays) carry no id.
+    if (envelope?.event === 'mcp-auth') {
+      if (typeof envelope.server === 'string' && envelope.server && (envelope.headers === null || (typeof envelope.headers === 'object' && !Array.isArray(envelope.headers)))) {
+        mcp.setAuthHeaders(envelope.server, envelope.headers as Record<string, string> | null);
+      }
+      return;
+    }
     if (typeof id !== 'string' || id.length > 100) throw new Error('Invalid request ID.');
     const request = envelope.request;
     if (request?.method === 'cuaTools' || request?.method === 'cuaSetTool' || request?.method === 'cuaSetEnabled') {
@@ -63,7 +73,7 @@ lines.on('line', (line) => {
       void task.then(() => inFlightCua.delete(task));
       return;
     }
-    if (request?.method === 'mcpTools' || request?.method === 'mcpSetServer' || request?.method === 'mcpSetTool') {
+    if (request?.method === 'mcpTools' || request?.method === 'mcpAddServer' || request?.method === 'mcpRemoveServer' || request?.method === 'mcpSetServer' || request?.method === 'mcpSetTool') {
       const task = handleMcp(id as string, request).catch((error) => {
         console.log(JSON.stringify({ id, error: error instanceof Error ? error.message : 'Request failed.' }));
       });

@@ -56,6 +56,14 @@ export class Runtime {
     return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials });
   }
   request(request: Request): Promise<Result> { return this.send(request); }
+  // Fire-and-forget event push to the backend (no id, no response expected).
+  async push(event: Record<string, unknown>): Promise<void> {
+    await this.ready;
+    if (this.stopped) return;
+    await new Promise<void>((resolve) => {
+      this.child.stdin.write(JSON.stringify(event) + '\n', () => resolve());
+    });
+  }
   private async send(request: unknown): Promise<Result> {
     await this.ready;
     if (this.stopped) throw new Error('Runtime is unavailable.');

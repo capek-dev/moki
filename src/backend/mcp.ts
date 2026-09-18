@@ -8,14 +8,19 @@ import { parseToolCallResult, type AgentToolDef, type Toolbag } from '@backend/c
 // User-added MCP servers. Slice 1: config file ownership plus stdio catalogs
 // (spawn -> initialize -> tools/list -> close, one short-lived connection per
 // fetch, mirroring the Cua transport). Slice 2: per-turn toolbags that execute
-// tools/call through lazily spawned per-server sessions. The config file is
-// the source of truth and is re-read on every fetch, so hand edits while Moki
-// runs are picked up. Toggles write the file back atomically and answer from
-// the cached catalog without a new spawn.
+// tools/call through lazily spawned per-server sessions. Slice 3: Streamable
+// HTTP connections (web servers such as Pipedream) plus add/remove from the
+// UI. The config file is the source of truth and is re-read on every fetch,
+// so hand edits while Moki runs are picked up. Toggles write the file back
+// atomically and answer from the cached catalog without a new spawn.
 
 const PROTOCOL_VERSION = '2024-11-05';
 const CLIENT_INFO = { name: 'moki', version: '0.1.0' };
-const REQUEST_TIMEOUT_MS = 6000;
+const REQUEST_TIMEOUT_MS = 9000;
+// The whole catalog fetch (initialize + tools/list) must fit the runtime pipe's
+// request window; bridge servers like mcp-remote warm-start in 3-5s, so one
+// slow step should leave the rest whatever remains of this budget.
+const FETCH_DEADLINE_MS = 14000;
 const DESCRIPTION_LIMIT = 1000;
 const SCHEMA_LIMIT = 8192;
 // App actions can be slower than catalog reads (searches, writes); still well
@@ -26,8 +31,20 @@ const CALL_TIMEOUT_MS = 45000;
 // name; `original` is what the server expects in tools/call (slice 2).
 export interface McpCatalogTool { exposed: string; original: string; description: string; inputSchema?: Record<string, unknown> }
 
+// Thrown by HTTP connections on 401/403 so catalog fetches can surface a
+// "sign in required" state instead of a generic error.
+export class AuthRequiredError extends Error {}
+
+// The transport contract both connection kinds satisfy: one JSON-RPC request
+// at a time with a timeout, plus fire-and-forget notifications and teardown.
+interface Connection {
+  request(method: string, params: unknown, timeoutMs: number): Promise<unknown>;
+  notify(method: string): void;
+  close(): void;
+}
+
 // Minimal stdio JSON-RPC client, generalized from the Cua transport.
-class StdioConnection {
+class StdioConnection implements Connection {
   private child: ChildProcessWithoutNullStreams;
   private buffer = '';
   private nextId = 1;
@@ -72,7 +89,7 @@ class StdioConnection {
       if (this.spawnError) { reject(this.spawnError); return; }
       if (this.closed) { reject(new Error(`"${this.label}" connection closed.`)); return; }
       const id = this.nextId++;
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`"${this.label}" did not respond in time.`)); }, timeoutMs);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`"${this.label}" did not respond in time. If it was still starting up, wait a moment and retry.`)); }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); },
@@ -91,6 +108,115 @@ class StdioConnection {
     this.failPending(new Error(`"${this.label}" connection closed.`));
     this.child.kill();
   }
+}
+
+// Streamable HTTP MCP client (the transport Pipedream and other web servers
+// speak): every request is its own POST; replies come back either as plain
+// JSON or inside a text/event-stream whose data frames carry the JSON-RPC
+// message. A session id granted on initialize is echoed on later requests.
+// Auth headers come from the config until the keychain flow lands (slice 3b).
+class HttpConnection implements Connection {
+  private sessionId: string | null = null;
+  private nextId = 1;
+  constructor(private label: string, private url: string, private headers: Record<string, string>) {}
+  async request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    const id = this.nextId++;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      let response: Response;
+      try {
+        response = await fetch(this.url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            ...this.headers,
+            ...(this.sessionId ? { 'mcp-session-id': this.sessionId } : {}),
+          },
+          body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+          signal: controller.signal,
+        });
+      } catch {
+        throw new Error(`"${this.label}" could not be reached.`);
+      }
+      const session = response.headers.get('mcp-session-id');
+      if (session) this.sessionId = session;
+      if (response.status === 401 || response.status === 403) throw new AuthRequiredError(`"${this.label}" needs you to sign in before it can be used.`);
+      if (!response.ok) {
+        // JSON-RPC servers explain failures in the body (Pipedream: 400
+        // "external user id is required"); static HTML edges do not.
+        const body = await response.text().catch(() => '');
+        let detail = '';
+        if (body.length <= 600) {
+          try {
+            const parsed = JSON.parse(body) as { error?: { message?: unknown } };
+            if (typeof parsed.error?.message === 'string' && parsed.error.message.trim()) detail = parsed.error.message.trim();
+          } catch { /* Not JSON; keep the bare status. */ }
+        }
+        throw new Error(detail ? `"${this.label}" says: ${detail}` : `"${this.label}" responded with ${response.status}.`);
+      }
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.includes('text/event-stream')) {
+        const message = await response.json() as { error?: { message?: unknown }; result?: unknown };
+        if (message.error) throw new Error(typeof message.error.message === 'string' && message.error.message ? message.error.message : `"${this.label}" returned an error.`);
+        return message.result;
+      }
+      // SSE: keep reading data frames until the one carrying our id arrives.
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) throw new Error(`"${this.label}" closed the connection before responding.`);
+          buffer += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, nl).replace(/\r$/, '');
+            buffer = buffer.slice(nl + 1);
+            if (!line.startsWith('data:')) continue; // comments, event names, keep-alives
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            let message: { id?: unknown; error?: { message?: unknown }; result?: unknown };
+            try { message = JSON.parse(payload); } catch { continue; }
+            if (message.id !== id) continue; // server notifications and other traffic
+            if (message.error) throw new Error(typeof message.error?.message === 'string' && message.error.message ? message.error.message : `"${this.label}" returned an error.`);
+            return message.result;
+          }
+        }
+      } finally { void reader.cancel().catch(() => {}); }
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') throw new Error(`"${this.label}" did not respond in time. If it was still starting up, wait a moment and retry.`);
+      throw error;
+    } finally { clearTimeout(timer); }
+  }
+  notify(method: string) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    void fetch(this.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...this.headers, ...(this.sessionId ? { 'mcp-session-id': this.sessionId } : {}) },
+      body: JSON.stringify({ jsonrpc: '2.0', method }),
+      signal: controller.signal,
+    }).catch(() => {}).finally(() => clearTimeout(timer)); // fire and forget
+  }
+  close() {
+    // Streamable HTTP ends a session with DELETE; nothing waits on it.
+    if (!this.sessionId) return;
+    const session = this.sessionId;
+    this.sessionId = null;
+    void fetch(this.url, { method: 'DELETE', headers: { ...this.headers, 'mcp-session-id': session } }).catch(() => {});
+  }
+}
+
+// The connection factory both catalog fetches and per-turn sessions use.
+function openConnection(key: string, config: McpServerConfig, authHeaders?: Record<string, string> | null): Connection {
+  // The sign-in overlay wins over anything hand-written in the config file.
+  const headers = { ...config.headers, ...(authHeaders ?? {}) };
+  return config.transport === 'http'
+    ? new HttpConnection(key, config.url!, headers)
+    : new StdioConnection(key, config.command!, config.args);
 }
 
 // Newline-delimited JSON-RPC MCP server used by tests and runtime checks: a
@@ -119,10 +245,18 @@ export class Mcp {
   // Last successfully parsed file contents, kept for write-back so unknown
   // fields hand-editors added survive UI-driven toggles.
   private rawCache: unknown;
-  private catalogs = new Map<string, { tools: McpCatalogTool[]; error: string | null }>();
+  private catalogs = new Map<string, { tools: McpCatalogTool[]; error: string | null; needsAuth?: boolean }>();
+  // Bearer headers pushed from Electron main after a UI sign-in; never written
+  // to the config file or disk.
+  private authHeaders = new Map<string, Record<string, string>>();
 
   constructor(dataDir: string) {
     this.configPath = join(dataDir, 'mcp.json');
+  }
+
+  setAuthHeaders(server: string, headers: Record<string, string> | null) {
+    if (headers) this.authHeaders.set(server, headers);
+    else this.authHeaders.delete(server);
   }
 
   private read(): ParsedMcpConfig {
@@ -159,12 +293,14 @@ export class Mcp {
   }
 
   // One fetch per server: a short-lived connection, closed either way.
-  private async fetchCatalog(key: string, config: McpServerConfig): Promise<{ tools: McpCatalogTool[]; error: string | null }> {
-    const connection = new StdioConnection(key, config.command!, config.args);
+  private async fetchCatalog(key: string, config: McpServerConfig): Promise<{ tools: McpCatalogTool[]; error: string | null; needsAuth?: boolean }> {
+    const connection = openConnection(key, config, this.authHeaders.get(key));
+    const started = Date.now();
+    const budget = () => Math.max(1500, FETCH_DEADLINE_MS - (Date.now() - started));
     try {
-      await connection.request('initialize', { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO }, REQUEST_TIMEOUT_MS);
+      await connection.request('initialize', { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO }, Math.min(REQUEST_TIMEOUT_MS, budget()));
       connection.notify('notifications/initialized');
-      const listed = await connection.request('tools/list', {}, REQUEST_TIMEOUT_MS) as { tools?: unknown[] } | undefined;
+      const listed = await connection.request('tools/list', {}, Math.min(REQUEST_TIMEOUT_MS, budget())) as { tools?: unknown[] } | undefined;
       const tools: McpCatalogTool[] = [];
       const prefix = serverPrefix(key);
       for (const entry of Array.isArray(listed?.tools) ? listed!.tools : []) {
@@ -180,6 +316,7 @@ export class Mcp {
       }
       return { tools, error: null };
     } catch (error) {
+      if (error instanceof AuthRequiredError) return { tools: [], error: 'Sign in to use this connection.', needsAuth: true };
       return { tools: [], error: error instanceof Error ? error.message : `"${key}" is not responding.` };
     } finally {
       connection.close();
@@ -192,11 +329,10 @@ export class Mcp {
   private buildState(parsed: ParsedMcpConfig): McpState {
     const assigned = this.assign(parsed);
     const servers = parsed.servers.map(({ key, config }) => {
-      if (!config.enabled) return { name: key, transport: config.transport, enabled: false, connected: false, tools: [], disabledTools: config.disabledTools, error: null } satisfies McpServerState;
-      if (config.transport === 'http') return { name: key, transport: config.transport, enabled: true, connected: false, tools: [], disabledTools: config.disabledTools, error: 'Remote (web) connections arrive in the next update.' } satisfies McpServerState;
+      if (!config.enabled) return { name: key, transport: config.transport, enabled: false, connected: false, tools: [], disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: false } satisfies McpServerState;
       const catalog = this.catalogs.get(key);
-      if (!catalog || catalog.error) return { name: key, transport: config.transport, enabled: true, connected: false, tools: [], disabledTools: config.disabledTools, error: catalog?.error ?? null } satisfies McpServerState;
-      return { name: key, transport: config.transport, enabled: true, connected: true, tools: (assigned.get(key) ?? []).map(({ exposed, description }) => ({ name: exposed, description })), disabledTools: config.disabledTools, error: null } satisfies McpServerState;
+      if (!catalog || catalog.error) return { name: key, transport: config.transport, enabled: true, connected: false, tools: [], disabledTools: config.disabledTools, error: catalog?.error ?? null, needsAuth: catalog?.needsAuth === true, signedIn: config.transport === 'http' && this.authHeaders.has(key) } satisfies McpServerState;
+      return { name: key, transport: config.transport, enabled: true, connected: true, tools: (assigned.get(key) ?? []).map(({ exposed, description }) => ({ name: exposed, description })), disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: config.transport === 'http' && this.authHeaders.has(key) } satisfies McpServerState;
     });
     return { servers, diagnostics: parsed.diagnostics };
   }
@@ -214,7 +350,7 @@ export class Mcp {
     };
     const assigned = new Map<string, { exposed: string; original: string; description: string; inputSchema?: Record<string, unknown> }[]>();
     for (const { key, config } of parsed.servers) {
-      const catalog = config.enabled && config.transport === 'stdio' ? this.catalogs.get(key) : undefined;
+      const catalog = config.enabled ? this.catalogs.get(key) : undefined;
       assigned.set(key, catalog && !catalog.error ? catalog.tools.map((tool) => ({ ...tool, exposed: unique(tool.exposed) })) : []);
     }
     return assigned;
@@ -222,7 +358,7 @@ export class Mcp {
 
   async tools(): Promise<McpState> {
     const parsed = this.read();
-    const active = parsed.servers.filter(({ config }) => config.enabled && config.transport === 'stdio');
+    const active = parsed.servers.filter(({ config }) => config.enabled);
     const fetched = await Promise.all(active.map(async ({ key, config }) => [key, await this.fetchCatalog(key, config)] as const));
     for (const [key, catalog] of fetched) this.catalogs.set(key, catalog);
     return this.buildState(parsed);
@@ -260,19 +396,50 @@ export class Mcp {
     return this.buildState({ servers: parsed.servers.map((entry) => entry.key === key ? { key, config: { ...entry.config, disabledTools: next } } : entry), diagnostics: parsed.diagnostics });
   }
 
+  // UI-driven add/remove. Names are both the config key and the visible
+  // connection name; duplicates are rejected so routing stays unambiguous.
+  addServer(input: { name?: unknown; kind?: unknown; command?: unknown; url?: unknown }): McpState {
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    if (!name || name.length > 64 || name.includes('/')) throw new Error('Enter a connection name (1-64 characters, no slashes).');
+    const parsed = this.read();
+    if (parsed.servers.some((server) => server.key === name)) throw new Error('A connection with that name already exists.');
+    if (input.kind === 'stdio') {
+      const command = typeof input.command === 'string' ? input.command.trim() : '';
+      if (!command) throw new Error('Enter the command the app runs from.');
+      const [binary, ...args] = command.split(/\s+/);
+      this.write((servers) => { servers[name] = { transport: 'stdio', command: binary, args, enabled: true }; });
+      return this.buildState({ servers: [...parsed.servers, { key: name, config: { transport: 'stdio', command: binary, args, url: null, headers: {}, enabled: true, disabledTools: [] } }], diagnostics: parsed.diagnostics });
+    }
+    if (input.kind === 'http') {
+      const url = typeof input.url === 'string' ? input.url.trim() : '';
+      if (!/^https?:\/\//i.test(url)) throw new Error('Enter a web address starting with http(s).');
+      this.write((servers) => { servers[name] = { transport: 'http', url, enabled: true }; });
+      return this.buildState({ servers: [...parsed.servers, { key: name, config: { transport: 'http', command: null, args: [], url, headers: {}, enabled: true, disabledTools: [] } }], diagnostics: parsed.diagnostics });
+    }
+    throw new Error('Choose a connection type.');
+  }
+  removeServer(key: unknown): McpState {
+    if (typeof key !== 'string' || !key) throw new Error('Invalid connection name.');
+    const parsed = this.read();
+    if (!parsed.servers.some((server) => server.key === key)) throw new Error('Connection not found.');
+    this.write((servers) => { delete servers[key]; });
+    this.catalogs.delete(key);
+    return this.buildState({ servers: parsed.servers.filter((server) => server.key !== key), diagnostics: parsed.diagnostics });
+  }
+
   // Everything the agent gets for one turn: catalogs minus disabled tools,
   // with per-server sessions spawned lazily on first use and all closed by
   // close() — the same lifecycle contract the Cua toolbag follows. A server
   // that cannot be fetched contributes zero tools instead of failing the turn.
   async toolbag(_signal?: AbortSignal): Promise<Toolbag> {
     const parsed = this.read();
-    const active = parsed.servers.filter(({ config }) => config.enabled && config.transport === 'stdio');
+    const active = parsed.servers.filter(({ config }) => config.enabled);
     await Promise.all(active.map(async ({ key, config }) => {
       this.catalogs.set(key, await this.fetchCatalog(key, config));
     }));
     const assigned = this.assign(parsed);
     const byKey = new Map(parsed.servers.map((server) => [server.key, server]));
-    const sessions = new Map<string, StdioConnection>();
+    const sessions = new Map<string, Connection>();
     const ready = new Map<string, Promise<void>>();
     const tools: AgentToolDef[] = [];
     const routing = new Map<string, { original: string; key: string }>();
@@ -288,7 +455,7 @@ export class Mcp {
     const ensure = (key: string): Promise<void> => {
       if (!ready.has(key)) {
         const server = byKey.get(key)!;
-        const connection = new StdioConnection(key, server.config.command!, server.config.args);
+        const connection = openConnection(key, server.config, this.authHeaders.get(key));
         sessions.set(key, connection);
         const init = (async () => {
           await connection.request('initialize', { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO }, REQUEST_TIMEOUT_MS);

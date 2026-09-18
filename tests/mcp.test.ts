@@ -18,6 +18,29 @@ function fakeServerConfig(extra: Record<string, unknown> = {}) {
   return { transport: 'stdio', command: process.execPath, args: ['-e', FAKE_SERVER_SOURCE], ...extra };
 }
 
+// In-process Streamable HTTP MCP server: initialize grants a session id,
+// tools/list answers plain JSON, and tools/call replies over SSE so both
+// response shapes are exercised. Records the headers it saw per request.
+function httpFake() {
+  const seen: { session: string | null; auth: string | null }[] = [];
+  const server = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      if (request.method !== 'POST') return new Response('noop', { status: 202 });
+      const message = await request.json() as { id?: unknown; method?: string; params?: { name?: string } };
+      seen.push({ session: request.headers.get('mcp-session-id'), auth: request.headers.get('authorization') });
+      if (message.method === 'initialize') return Response.json({ jsonrpc: '2.0', id: message.id, result: { serverInfo: { name: 'web', version: '1' } } }, { headers: { 'mcp-session-id': 'sess-7' } });
+      if (message.method === 'tools/list') return Response.json({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'search_web', description: 'Search the web.' }] } });
+      if (message.method === 'tools/call') {
+        const frame = `event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: `web-called:${message.params?.name}` }] } })}\n\n`;
+        return new Response(frame, { headers: { 'content-type': 'text/event-stream' } });
+      }
+      return Response.json({ jsonrpc: '2.0', id: message.id, error: { message: 'unsupported' } });
+    },
+  });
+  return { url: `http://localhost:${server.port}`, seen, stop: () => server.stop(true) };
+}
+
 test('server keys become safe prefixes', () => {
   expect(serverPrefix('filesystem')).toBe('filesystem');
   expect(serverPrefix('café')).toBe('caf-');
@@ -210,4 +233,110 @@ test('mergeToolbags routes by name, drops duplicates, and closes every bag', asy
   await expect(merged.execute('nope', {})).rejects.toThrow('Unknown tool.');
   merged.close();
   expect(closed.sort()).toEqual([1, 2]); // close reaches every source, filtered or not
+});
+
+test('http connections fetch catalogs, carry auth headers, and reuse session ids', async () => {
+  const { dir, cleanup } = freshDir();
+  const web = httpFake();
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { web: { transport: 'http', url: web.url, headers: { authorization: 'Bearer tok' } } } }));
+    const state = await new Mcp(dir).tools();
+    const server = state.servers[0];
+    expect(server.connected).toBe(true);
+    expect(server.tools.map((tool) => tool.name)).toEqual(['web__search_web']);
+    expect(web.seen.at(-1)?.session).toBe('sess-7'); // granted id echoed on later requests
+    expect(web.seen.every((entry) => entry.auth === 'Bearer tok')).toBe(true);
+  } finally { web.stop(); cleanup(); }
+});
+
+test('unreachable http connections report a friendly error', async () => {
+  const { dir, cleanup } = freshDir();
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { ghostweb: { transport: 'http', url: 'http://127.0.0.1:59999' } } }));
+    const state = await new Mcp(dir).tools();
+    expect(state.servers[0].connected).toBe(false);
+    expect(state.servers[0].error).toContain('could not be reached');
+  } finally { cleanup(); }
+});
+
+// Pipedream's shape: failures explained in a JSON-RPC error body must reach
+// the connection card verbatim instead of a bare status code.
+test('jsonrpc error bodies surface as readable connection errors', async () => {
+  const { dir, cleanup } = freshDir();
+  const grumpy = Bun.serve({
+    port: 0,
+    fetch: async () => Response.json({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'external user id is required. Please see docs for more info.' } }, { status: 400 }),
+  });
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { grumpy: { transport: 'http', url: `http://localhost:${grumpy.port}` } } }));
+    const state = await new Mcp(dir).tools();
+    expect(state.servers[0].connected).toBe(false);
+    expect(state.servers[0].error).toContain('says: external user id is required');
+    expect(state.servers[0].needsAuth).toBe(false);
+  } finally { grumpy.stop(true); cleanup(); }
+});
+
+test('http toolbag executes tools through SSE responses', async () => {
+  const { dir, cleanup } = freshDir();
+  const web = httpFake();
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { web: { transport: 'http', url: web.url } } }));
+    const bag = await new Mcp(dir).toolbag();
+    const result = await bag.execute('web__search_web', { q: 'moki' });
+    expect(result.text).toBe('web-called:search_web');
+    expect(result.isError).toBe(false);
+    bag.close();
+  } finally { web.stop(); cleanup(); }
+});
+
+// Auth-gated server: 401 without a token, full catalog with the overlay.
+test('sign-in headers overlay config headers and 401s surface needsAuth', async () => {
+  const { dir, cleanup } = freshDir();
+  const auths: (string | null)[] = [];
+  const guarded = Bun.serve({
+    port: 0,
+    fetch: async (request) => {
+      const auth = request.headers.get('authorization');
+      auths.push(auth);
+      if (request.method !== 'POST' || auth !== 'Bearer tok') return new Response('denied', { status: 401 });
+      const message = await request.json() as { id?: unknown; method?: string };
+      if (message.method === 'initialize') return Response.json({ jsonrpc: '2.0', id: message.id, result: { serverInfo: { name: 'guarded' } } });
+      if (message.method === 'tools/list') return Response.json({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'search_web', description: 'Search.' }] } });
+      return Response.json({ jsonrpc: '2.0', id: message.id, error: { message: 'unsupported' } });
+    },
+  });
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { guarded: { transport: 'http', url: `http://localhost:${guarded.port}` } } }));
+    const mcp = new Mcp(dir);
+    const denied = await mcp.tools();
+    expect(denied.servers[0]).toMatchObject({ connected: false, needsAuth: true, signedIn: false });
+    expect(denied.servers[0].error).toContain('Sign in');
+    const bag = await mcp.toolbag();
+    expect(bag.tools).toEqual([]); // auth-gated servers contribute no tools
+    bag.close();
+    mcp.setAuthHeaders('guarded', { authorization: 'Bearer tok' });
+    const allowed = await mcp.tools();
+    expect(allowed.servers[0]).toMatchObject({ connected: true, needsAuth: false, signedIn: true });
+    expect(allowed.servers[0].tools.map((tool) => tool.name)).toEqual(['guarded__search_web']);
+    mcp.setAuthHeaders('guarded', null);
+    const revoked = await mcp.tools();
+    expect(revoked.servers[0]).toMatchObject({ signedIn: false, needsAuth: true });
+  } finally { guarded.stop(true); cleanup(); }
+});
+
+test('addServer writes the config, rejects bad input, and removeServer deletes', () => {
+  const { dir, cleanup } = freshDir();
+  try {
+    const mcp = new Mcp(dir);
+    const state = mcp.addServer({ name: 'notes', kind: 'stdio', command: 'bun run server.js --fast' });
+    expect(state.servers.map((server) => server.name)).toEqual(['notes']);
+    expect(JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).servers.notes).toEqual({ transport: 'stdio', command: 'bun', args: ['run', 'server.js', '--fast'], enabled: true });
+    expect(() => mcp.addServer({ name: 'notes', kind: 'stdio', command: 'bun x' })).toThrow('already exists');
+    expect(() => mcp.addServer({ name: 'bad/name', kind: 'stdio', command: 'bun x' })).toThrow('no slashes');
+    expect(() => mcp.addServer({ name: 'webby', kind: 'http', url: 'ftp://nope' })).toThrow('http(s)');
+    expect(() => mcp.addServer({ name: 'webby', kind: 'pigeon' })).toThrow('connection type');
+    expect(mcp.removeServer('notes').servers).toEqual([]);
+    expect(JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).servers).toEqual({});
+    expect(() => mcp.removeServer('notes')).toThrow('Connection not found.');
+  } finally { cleanup(); }
 });

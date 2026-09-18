@@ -8,6 +8,7 @@ const api: DesktopAPI = {
     return () => ipcRenderer.removeListener('moki:runtime-error', handler);
   },
   providers: (command) => ipcRenderer.invoke('moki:providers', command),
+  mcpAuth: (command) => ipcRenderer.invoke('moki:auth', command),
   onProviders: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
     ipcRenderer.on('moki:providers-state', handler);

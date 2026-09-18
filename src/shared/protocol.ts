@@ -22,6 +22,8 @@ export type Request =
   | { method: 'cuaSetTool'; tool: string; disabled: boolean }
   | { method: 'cuaSetEnabled'; enabled: boolean }
   | { method: 'mcpTools' }
+  | { method: 'mcpAddServer'; name: string; kind: 'stdio' | 'http'; command?: string; url?: string }
+  | { method: 'mcpRemoveServer'; server: string }
   | { method: 'mcpSetServer'; server: string; enabled: boolean }
   | { method: 'mcpSetTool'; server: string; tool: string; disabled: boolean };
 export interface Result { snapshot: Snapshot; conversationId?: string; revision?: number; cua?: CuaState; mcp?: McpState }
@@ -36,8 +38,12 @@ export interface CuaState { enabled: boolean; connected: boolean; version: strin
 // User-added MCP connections (config file is the source of truth). Tool names
 // are the prefixed, model-facing ones (`server__tool`).
 export interface McpTool { name: string; description: string }
-export interface McpServerState { name: string; transport: 'stdio' | 'http'; enabled: boolean; connected: boolean; tools: McpTool[]; disabledTools: string[]; error: string | null }
+export interface McpServerState { name: string; transport: 'stdio' | 'http'; enabled: boolean; connected: boolean; tools: McpTool[]; disabledTools: string[]; error: string | null; needsAuth: boolean; signedIn: boolean }
 export interface McpState { servers: McpServerState[]; diagnostics: string[] }
+// Sign-in for web connections runs entirely in Electron main (browser OAuth,
+// encrypted vault); the renderer only starts it and observes the outcome.
+export type McpAuthCommand = { action: 'signIn'; server: string } | { action: 'signOut'; server: string };
+export interface McpAuthResult { signedIn: boolean; note?: string }
 // One agent tool invocation attached to an assistant reply. `label` is the
 // friendly phrase, `detail` the argument digest, `summary` the result digest.
 export interface ToolCallRecord { name: string; label: string; detail: string; summary: string | null; status: 'running' | 'ok' | 'failed'; at: number }
@@ -46,6 +52,7 @@ export interface DesktopAPI {
   chat(request: ChatRequest): Promise<Result>;
   onRuntimeError(listener: (message: string) => void): () => void;
   providers(command: ProviderCommand): Promise<ProviderState>;
+  mcpAuth(command: McpAuthCommand): Promise<McpAuthResult>;
   onProviders(listener: (state: ProviderState) => void): () => void;
   request(request: Request): Promise<Result>;
   openSettings(): Promise<void>;

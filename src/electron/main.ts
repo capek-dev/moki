@@ -5,6 +5,7 @@ import { ScreenshotCapture } from '@electron/screenshot-capture';
 import { EncryptedVault, ProviderConnections } from '@electron/provider-connections';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { parseMcpConfig } from '@shared/mcp';
 import { pathToFileURL } from 'node:url';
 import { Runtime } from '@electron/runtime';
 import { requireThinking } from '@shared/models';
@@ -35,6 +36,7 @@ function broadcast(result: Result) {
 let tray: Tray | undefined;
 let runtime: Runtime | undefined;
 let providers: ProviderConnections | undefined;
+let mcpAuth: import('@electron/mcp-connections').McpConnections | undefined;
 let capture: ScreenshotCapture | undefined;
 let quitting = false;
 let shutdownComplete = false;
@@ -100,6 +102,18 @@ async function openHistory() {
 function showSettings() {
   void openSettings().catch((error) => dialog.showErrorBox('Could not open settings', String(error)));
 }
+// Resolve a web connection's URL from the user-owned config file; sign-in is
+// meaningful only for HTTP transports.
+function mcpServerUrl(name: string): string {
+  let text: string;
+  try { text = readFileSync(join(app.getPath('userData'), 'mcp.json'), 'utf8'); }
+  catch { throw new Error('Connection not found.'); }
+  let parsed;
+  try { parsed = parseMcpConfig(JSON.parse(text)); } catch { throw new Error('The connections file is not valid JSON.'); }
+  const server = parsed.servers.find((entry) => entry.key === name && entry.config.transport === 'http');
+  if (!server) throw new Error('Only web connections use sign-in.');
+  return server.config.url!;
+}
 function showHistory() {
   void openHistory().catch((error) => dialog.showErrorBox('Could not open history', String(error)));
 }
@@ -115,6 +129,15 @@ else {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:runtime-error', message);
     });
     await runtime.ready;
+    // Sign-ins from previous sessions keep working: push their headers into
+    // the backend before anything fetches a catalog.
+    mcpAuth = new (await import('@electron/mcp-connections')).McpConnections(
+      new (await import('@electron/mcp-connections')).EncryptedMcpVault(join(app.getPath('userData'), 'mcp.encrypted'), safeStorage),
+      (url) => shell.openExternal(url),
+    );
+    try {
+      for (const [server, headers] of Object.entries(mcpAuth.allHeaders())) await runtime.push({ event: 'mcp-auth', server, headers });
+    } catch (error) { console.error('[moki] mcp sign-in restore failed:', error instanceof Error ? error.message : String(error)); }
     const attachmentDirs = attachmentDirectories(app.getPath('userData'));
     mkdirSync(attachmentDirs.drafts, { recursive: true, mode: 0o700 });
     mkdirSync(attachmentDirs.content, { recursive: true, mode: 0o700 });
@@ -146,6 +169,17 @@ else {
       if (event.sender !== settings?.webContents) throw new Error('Provider settings are only available in Settings.');
       return providers!.handle(command);
     });
+    ipcMain.handle('moki:auth', async (event, command: unknown) => {
+      assertTrusted(event);
+      if (event.sender !== settings?.webContents) throw new Error('Connection settings are only available in Settings.');
+      if (!mcpAuth) throw new Error('Sign-in is not ready yet. Try again in a moment.');
+      const input = command as { action?: unknown; server?: unknown };
+      if (!input || typeof input !== 'object' || (input.action !== 'signIn' && input.action !== 'signOut') || typeof input.server !== 'string' || !input.server || input.server.length > 64) throw new Error('Invalid sign-in request.');
+      const url = input.action === 'signIn' ? mcpServerUrl(input.server) : undefined;
+      const result = await mcpAuth.handle(url ? { action: 'signIn', server: input.server, url } : { action: 'signOut', server: input.server });
+      await runtime!.push({ event: 'mcp-auth', server: input.server, headers: mcpAuth.headers(input.server) });
+      return result;
+    });
     ipcMain.handle('moki:settings', (event) => { assertTrusted(event); return openSettings(); });
     ipcMain.handle('moki:history', (event) => { assertTrusted(event); return openHistory(); });
     ipcMain.handle('moki:copy-text', (event, text: unknown) => {
@@ -162,9 +196,9 @@ else {
     ipcMain.handle('moki:request', async (event, input: unknown) => {
       assertTrusted(event);
       // Explicit ingress allowlist blocks private credential-bearing pipe commands.
-      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat', 'revertMessage', 'cuaTools', 'cuaSetTool', 'cuaSetEnabled', 'mcpTools', 'mcpSetServer', 'mcpSetTool'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
+      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat', 'revertMessage', 'cuaTools', 'cuaSetTool', 'cuaSetEnabled', 'mcpTools', 'mcpAddServer', 'mcpRemoveServer', 'mcpSetServer', 'mcpSetTool'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
       const request = input as Request;
-      if ((request.method === 'cuaTools' || request.method === 'cuaSetTool' || request.method === 'cuaSetEnabled' || request.method === 'mcpTools' || request.method === 'mcpSetServer' || request.method === 'mcpSetTool') && event.sender !== settings?.webContents) throw new Error('Connection settings are only available in Settings.');
+      if ((request.method === 'cuaTools' || request.method === 'cuaSetTool' || request.method === 'cuaSetEnabled' || request.method === 'mcpTools' || request.method === 'mcpAddServer' || request.method === 'mcpRemoveServer' || request.method === 'mcpSetServer' || request.method === 'mcpSetTool') && event.sender !== settings?.webContents) throw new Error('Connection settings are only available in Settings.');
       if (request.method === 'cancelChat') pendingChats.delete(request.conversationId);
       return broadcast(await runtime!.request(request));
     });
@@ -234,6 +268,7 @@ else {
     globalShortcut.unregisterAll();
     capture?.close();
     providers?.close();
+    mcpAuth?.close();
     void (runtime?.close() ?? Promise.resolve()).finally(() => { shutdownComplete = true; app.quit(); });
   });
 }

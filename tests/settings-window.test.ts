@@ -82,6 +82,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
     'node:path': path, 'node:url': url, 'node:readline': readline,
     'node:crypto': nodeCrypto, 'node:fs': {
       statSync() { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
+      readFileSync() { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
       readdirSync: () => [] as string[],
       rmSync() {},
       mkdirSync(dir: string, options: unknown) { expect(options).toEqual({ recursive: true, mode: 0o700 }); expect(dir.startsWith('/unused/')).toBe(true); },
@@ -106,6 +107,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(windows[0].webContents.devTools).toBe(development ? 1 : 0);
     expect(() => handlers.get('moki:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
     await expect(request(event(windows[0]), { method: 'cuaTools' })).rejects.toThrow('only available in Settings');
+    await expect(handlers.get('moki:auth')!(event(windows[0]), { action: 'signIn', server: 'webby' })).rejects.toThrow('only available in Settings');
     await expect(request(event(windows[0]), { method: 'cuaSetTool', tool: 'click', disabled: true })).rejects.toThrow('only available in Settings');
     await expect(request(event(windows[0]), { method: 'cuaSetEnabled', enabled: false })).rejects.toThrow('only available in Settings');
     await open(event(windows[0]));

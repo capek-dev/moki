@@ -97,7 +97,8 @@ test('renderer and main-process boundaries expose unsend and edit safely', async
     Bun.file('src/electron/runtime.ts').text(),
     Bun.file('src/renderer/windows/chat-window.tsx').text(),
   ]);
-  expect(main).toContain("'cancelChat', 'revertMessage']");
+  expect(main).toContain("'cancelChat', 'revertMessage', 'cuaTools'");
+  expect(main).toContain("'mcpTools', 'mcpAddServer', 'mcpRemoveServer', 'mcpSetServer', 'mcpSetTool']");
   expect(main).toContain('editOf: input.editOf');
   expect(main).toContain('input.editOf.length > 100');
   expect(runtime).toContain('editOf: request.editOf');
