@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { diagnosticConfig, parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix, TOOL_NAME_MAX, type McpServerConfig, type ParsedMcpConfig } from '@shared/mcp';
+import { compactSchema, diagnosticConfig, parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix, schemaWeight, toolMatchesPattern, TOOL_SCHEMA_BUDGET, TOOL_NAME_MAX, type McpServerConfig, type ParsedMcpConfig, type ToolWeightLabel } from '@shared/mcp';
 import type { McpServerState, McpState } from '@shared/protocol';
 import { parseToolCallResult, type AgentToolDef, type Toolbag } from '@backend/cua';
 import type { Store } from '@backend/store';
@@ -251,6 +251,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
 });
 `;
 
+// Catalog tools carry `exposed` as the model-facing name; weigh the shape
+// the model actually receives.
+const weightOf = (tools: readonly { exposed: string; description: string; inputSchema?: Record<string, unknown> }[]): number =>
+  schemaWeight(tools.map((tool) => ({ name: tool.exposed, description: tool.description, inputSchema: compactSchema(tool.inputSchema) })));
+
 export class Mcp {
   private configPath: string;
   // Last successfully parsed file contents, kept for write-back so unknown
@@ -427,10 +432,11 @@ export class Mcp {
   private buildState(parsed: ParsedMcpConfig): McpState {
     const assigned = this.assign(parsed);
     const servers = parsed.servers.map(({ key, config }) => {
-      if (!config.enabled) return { name: key, transport: config.transport, enabled: false, connected: false, tools: [], disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: false, stale: false } satisfies McpServerState;
+      if (!config.enabled) return { name: key, transport: config.transport, enabled: false, connected: false, tools: [], disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: false, stale: false, weight: 0 } satisfies McpServerState;
       const catalog = this.catalogs.get(key);
-      if (!catalog || catalog.error) return { name: key, transport: config.transport, enabled: true, connected: false, tools: [], disabledTools: config.disabledTools, error: catalog?.error ?? null, needsAuth: catalog?.needsAuth === true, signedIn: config.transport === 'http' && this.authHeaders.has(key), stale: false } satisfies McpServerState;
-      return { name: key, transport: config.transport, enabled: true, connected: true, tools: (assigned.get(key) ?? []).map(({ exposed, description }) => ({ name: exposed, description })), disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: config.transport === 'http' && this.authHeaders.has(key), stale: catalog.stale === true } satisfies McpServerState;
+      if (!catalog || catalog.error) return { name: key, transport: config.transport, enabled: true, connected: false, tools: [], disabledTools: config.disabledTools, error: catalog?.error ?? null, needsAuth: catalog?.needsAuth === true, signedIn: config.transport === 'http' && this.authHeaders.has(key), stale: false, weight: 0 } satisfies McpServerState;
+      const assignedTools = assigned.get(key) ?? [];
+      return { name: key, transport: config.transport, enabled: true, connected: true, tools: assignedTools.map(({ exposed, description }) => ({ name: exposed, description })), disabledTools: config.disabledTools, error: null, needsAuth: false, signedIn: config.transport === 'http' && this.authHeaders.has(key), stale: catalog.stale === true, weight: weightOf(assignedTools) } satisfies McpServerState;
     });
     return { servers, diagnostics: parsed.diagnostics };
   }
@@ -449,7 +455,16 @@ export class Mcp {
     const assigned = new Map<string, { exposed: string; original: string; description: string; inputSchema?: Record<string, unknown> }[]>();
     for (const { key, config } of parsed.servers) {
       const catalog = config.enabled ? this.catalogs.get(key) : undefined;
-      assigned.set(key, catalog && !catalog.error ? catalog.tools.map((tool) => ({ ...tool, exposed: unique(tool.exposed) })) : []);
+      // Deny patterns (config-file power-user layer) filter here, the single
+      // choke point both Settings state and the toolbag read through, so the
+      // two can never disagree about what exists.
+      const deny = config.denyTools ?? [];
+      const tools = catalog && !catalog.error
+        ? catalog.tools
+            .filter((tool) => !deny.some((pattern) => toolMatchesPattern(pattern, tool.exposed, tool.original)))
+            .map((tool) => ({ ...tool, exposed: unique(tool.exposed) }))
+        : [];
+      assigned.set(key, tools);
     }
     return assigned;
   }
@@ -509,13 +524,13 @@ export class Mcp {
       if (!command) throw new Error('Enter the command the app runs from.');
       const [binary, ...args] = command.split(/\s+/);
       this.write((servers) => { servers[name] = { transport: 'stdio', command: binary, args, enabled: true }; });
-      return this.buildState({ servers: [...parsed.servers, { key: name, config: { transport: 'stdio', command: binary, args, url: null, headers: {}, enabled: true, disabledTools: [] } }], diagnostics: parsed.diagnostics });
+      return this.buildState({ servers: [...parsed.servers, { key: name, config: { transport: 'stdio', command: binary, args, url: null, headers: {}, enabled: true, disabledTools: [], denyTools: [] } }], diagnostics: parsed.diagnostics });
     }
     if (input.kind === 'http') {
       const url = typeof input.url === 'string' ? input.url.trim() : '';
       if (!/^https?:\/\//i.test(url)) throw new Error('Enter a web address starting with http(s).');
       this.write((servers) => { servers[name] = { transport: 'http', url, enabled: true }; });
-      return this.buildState({ servers: [...parsed.servers, { key: name, config: { transport: 'http', command: null, args: [], url, headers: {}, enabled: true, disabledTools: [] } }], diagnostics: parsed.diagnostics });
+      return this.buildState({ servers: [...parsed.servers, { key: name, config: { transport: 'http', command: null, args: [], url, headers: {}, enabled: true, disabledTools: [], denyTools: [] } }], diagnostics: parsed.diagnostics });
     }
     throw new Error('Choose a connection type.');
   }
@@ -549,14 +564,16 @@ export class Mcp {
     const sessions = new Map<string, Connection>();
     const ready = new Map<string, Promise<void>>();
     const tools: AgentToolDef[] = [];
+    const weights: ToolWeightLabel[] = [];
     const routing = new Map<string, { original: string; key: string }>();
     for (const [key, serverTools] of assigned) {
       const disabled = new Set(byKey.get(key)!.config.disabledTools);
-      for (const tool of serverTools) {
-        if (disabled.has(tool.exposed)) continue;
-        tools.push({ name: tool.exposed, description: tool.description, inputSchema: tool.inputSchema ?? { type: 'object' } });
+      const enabledTools = serverTools.filter((tool) => !disabled.has(tool.exposed));
+      for (const tool of enabledTools) {
+        tools.push({ name: tool.exposed, description: tool.description, inputSchema: compactSchema(tool.inputSchema) ?? { type: 'object' } });
         routing.set(tool.exposed, { original: tool.original, key });
       }
+      if (enabledTools.length) weights.push({ label: key, weight: weightOf(enabledTools) });
     }
     // Initialize a server's long-lived connection on its first call this turn.
     const ensure = (key: string): Promise<void> => {
@@ -579,6 +596,7 @@ export class Mcp {
     };
     return {
       tools,
+      weights,
       execute: async (name, args) => {
         const route = routing.get(name);
         if (!route) throw new Error('Unknown tool.');
@@ -607,6 +625,14 @@ export class Mcp {
 // into one turn bag. Name collisions are dropped with a diagnostic — the
 // naming rules make them practically impossible — and close() always reaches
 // every source, even ones whose tools were all filtered out.
+//
+// Plan 18 slice 4, tiering (the Hermes/Anthropic pattern): when the merged
+// schemas exceed the budget, the heaviest sources are demoted — their tools
+// stop shipping upfront and become discoverable through two small meta-tools
+// (search_tools + call_tool) instead. Nothing is dropped or unavailable; the
+// model just fetches schemas on demand. Re-evaluated every turn because this
+// runs per turn. ToolBudgetError stays in chat.ts as defense in depth, but
+// demotion always fits (the meta-tools themselves are ~0.5 KB).
 export function mergeToolbags(bags: readonly Toolbag[]): Toolbag {
   const routing = new Map<string, Toolbag>();
   const tools: AgentToolDef[] = [];
@@ -620,8 +646,44 @@ export function mergeToolbags(bags: readonly Toolbag[]): Toolbag {
       tools.push(definition);
     }
   }
+  // Per-source weights when bags carry them; unlabeled bags get one generic
+  // entry so their cost still counts.
+  const weights: ToolWeightLabel[] = bags.flatMap((bag) => bag.weights ?? (bag.tools.length ? [{ label: 'tools', weight: schemaWeight(bag.tools) }] : []));
+  const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
+  let shipped = tools;
+  if (total > TOOL_SCHEMA_BUDGET) {
+    // Demote heaviest-first until the remaining full schemas fit.
+    const perBag = bags.map((bag, index) => ({ bag, index, weight: bag.weights?.reduce((sum, entry) => sum + entry.weight, 0) ?? schemaWeight(bag.tools) }));
+    const order = [...perBag].sort((a, b) => b.weight - a.weight || a.index - b.index);
+    const demoted = new Set<Toolbag>();
+    let remaining = total;
+    for (const entry of order) {
+      if (remaining <= TOOL_SCHEMA_BUDGET) break;
+      demoted.add(entry.bag);
+      remaining -= entry.weight;
+    }
+    const demotedNames = new Set(tools.filter((definition) => demoted.has(routing.get(definition.name)!)).map((definition) => definition.name));
+    shipped = tools.filter((definition) => !demotedNames.has(definition.name));
+    const pool = tools.filter((definition) => demotedNames.has(definition.name));
+    if (pool.length) {
+      // A real server tool named like a meta-tool wins; the meta name moves.
+      const searchName = routing.has('search_tools') ? 'search_tools_moki' : 'search_tools';
+      const callName = routing.has('call_tool') ? 'call_tool_moki' : 'call_tool';
+      const meta: Toolbag = {
+        tools: [
+          { name: searchName, description: `Search connected apps for actions by keyword. Returns up to 5 matching actions with their settings; run them with ${callName}.`, inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
+          { name: callName, description: `Run an action found by ${searchName}. Pass its exact name and its arguments.`, inputSchema: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object' } }, required: ['name'] } },
+        ],
+        execute: (name, args) => name === searchName ? searchPool(pool, args) : callFromPool(routing, name, args),
+        close: () => {},
+      };
+      for (const definition of meta.tools) { routing.set(definition.name, meta); shipped.push(definition); }
+      console.error(`[moki] tool tiering: ${pool.length} tools from ${demoted.size} source(s) load on demand (total ${total} > ${TOOL_SCHEMA_BUDGET} chars: ${weights.map((entry) => `${entry.label}=${entry.weight}`).join(', ')})`);
+    }
+  }
   return {
-    tools,
+    tools: shipped,
+    weights,
     execute: async (name, args) => {
       const bag = routing.get(name);
       if (!bag) throw new Error('Unknown tool.');
@@ -629,4 +691,40 @@ export function mergeToolbags(bags: readonly Toolbag[]): Toolbag {
     },
     close: () => { for (const bag of bags) bag.close(); },
   };
+}
+
+// Keyword search over the demoted pool: name matches count triple, plain
+// text too. Returns up to 5 tools with their schemas so the model can call
+// them immediately; capped like any tool result.
+async function searchPool(pool: readonly AgentToolDef[], args: unknown): Promise<{ text: string; isError: boolean }> {
+  const query = typeof (args as { query?: unknown })?.query === 'string' ? (args as { query: string }).query.toLowerCase().trim() : '';
+  if (!query) return { text: 'Tool error: provide one or more search words.', isError: true };
+  const terms = query.split(/\s+/).filter(Boolean);
+  const scored = pool
+    .map((tool) => {
+      const name = tool.name.toLowerCase();
+      const description = tool.description.toLowerCase();
+      let score = 0;
+      for (const term of terms) {
+        if (name.includes(term)) score += 3;
+        if (description.includes(term)) score += 1;
+      }
+      return { tool, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+  if (!scored.length) return { text: 'No matching actions. Try different words, or turn on fewer connections in Settings > Connections.', isError: false };
+  let text = scored.map(({ tool }) => `${tool.name} — ${tool.description.split('\n')[0]}\n${JSON.stringify(tool.inputSchema)}`).join('\n\n');
+  if (text.length > 12000) text = text.slice(0, 12000) + '\n…[truncated]';
+  return { text, isError: false };
+}
+
+// Execute a demoted tool by name; routing still knows its owning bag.
+async function callFromPool(routing: Map<string, Toolbag>, _name: string, args: unknown): Promise<{ text: string; isError: boolean }> {
+  const input = (args ?? {}) as { name?: unknown; arguments?: unknown };
+  if (typeof input.name !== 'string' || !input.name) return { text: 'Tool error: pass the action name you found via search_tools.', isError: true };
+  const bag = routing.get(input.name);
+  if (!bag) return { text: `Tool error: "${input.name}" was not found. Search for it first with search_tools.`, isError: true };
+  return bag.execute(input.name, input.arguments ?? {});
 }

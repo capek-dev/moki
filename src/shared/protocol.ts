@@ -34,11 +34,11 @@ export type ProviderCommand =
   | { action: 'disconnect'; provider: Provider };
 export interface ProviderState { error?: string; revision: number; deepseek: { connected: boolean }; codex: { connected: boolean }; signingIn: boolean }
 export interface CuaTool { name: string; description: string }
-export interface CuaState { enabled: boolean; connected: boolean; version: string | null; tools: CuaTool[]; disabled: string[]; error: string | null }
+export interface CuaState { enabled: boolean; connected: boolean; version: string | null; tools: CuaTool[]; disabled: string[]; error: string | null; weight: number }
 // User-added MCP connections (config file is the source of truth). Tool names
 // are the prefixed, model-facing ones (`server__tool`).
 export interface McpTool { name: string; description: string }
-export interface McpServerState { name: string; transport: 'stdio' | 'http'; enabled: boolean; connected: boolean; tools: McpTool[]; disabledTools: string[]; error: string | null; needsAuth: boolean; signedIn: boolean; stale: boolean }
+export interface McpServerState { name: string; transport: 'stdio' | 'http'; enabled: boolean; connected: boolean; tools: McpTool[]; disabledTools: string[]; error: string | null; needsAuth: boolean; signedIn: boolean; stale: boolean; weight: number }
 export interface McpState { servers: McpServerState[]; diagnostics: string[] }
 // Sign-in for web connections runs entirely in Electron main (browser OAuth,
 // encrypted vault); the renderer only starts it and observes the outcome.

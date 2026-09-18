@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '@backend/store';
 import { Chat, history, type Generate, type Turn } from '@backend/chat';
+import { ToolBudgetError } from '@shared/mcp';
 import type { Toolbag } from '@backend/cua';
 import { applyResult } from '@renderer/lib/chat-state';
 import type { Attachment, Message, Result } from '@shared/protocol';
@@ -79,6 +80,25 @@ test('tool calls execute through the bag, persist on the reply, and close', asyn
     expect(closed).toBe(1);
   } finally { f.close(); }
 });
+test('an over-budget toolset fails the turn instead of silently going toolless', async () => {
+  const store = new Store(':memory:');
+  const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => { finish = resolve; });
+  const events: Result[] = [];
+  const chat = new Chat(store, async function* () { yield 'should never stream'; }, (result) => { events.push(result); if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); },
+    async () => { throw new ToolBudgetError(70_000, 60_000, [{ label: 'pipedream', weight: 70_000 }]); });
+  try {
+    chat.start({ conversationId: id, text: 'Hello', model: 'deepseek-flash', credentials });
+    await done;
+    const reply = store.messages(id).at(-1)!;
+    expect(reply.status).toBe('failed');
+    expect(reply.error).toContain('Too many tools');
+    expect(reply.error).toContain('Settings > Connections');
+    expect(reply.text).toBe(''); // the model was never called
+  } finally { chat.close(); store.close(); }
+});
+
 test('tool failures return an error string to the model instead of failing the turn', async () => {
   const bag: Toolbag = {
     tools: [{ name: 'click', description: 'Click.', inputSchema: { type: 'object' } }],

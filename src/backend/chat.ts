@@ -5,7 +5,7 @@ import type { Attachment, Provider, Result, Message, ToolCallRecord } from '@sha
 import { requireAttachmentId } from '@shared/attachments';
 import type { Toolbag } from '@backend/cua';
 import { cuaToolLabel, describeCuaCall } from '@shared/cua';
-import { describeMcpCall, mcpToolLabel } from '@shared/mcp';
+import { describeMcpCall, mcpToolLabel, ToolBudgetError } from '@shared/mcp';
 
 // Terminal diagnostics: the full error chain for the host process stderr.
 // Never surfaced to the renderer; credentials do not travel in error objects.
@@ -100,7 +100,15 @@ export class Chat {
     // finish() always closes.
     queueMicrotask(() => { void (async () => {
       try {
-        if (this.toolSource) { try { bag = await this.toolSource(abort.signal); } catch (error) { console.error(`[moki] tool source unavailable, continuing without tools: ${describeError(error)}`); bag = undefined; } }
+        if (this.toolSource) { try { bag = await this.toolSource(abort.signal); } catch (error) {
+          // Plan 18: an over-budget toolset fails the turn with guidance — it
+          // must never degrade to a silent toolless reply.
+          if (error instanceof ToolBudgetError) {
+            console.error(`[moki] tool budget exceeded conversation=${id}: ${error.detail} (total ${error.total} > ${error.budget})`);
+            finish('failed', error.message);
+            return;
+          }
+          console.error(`[moki] tool source unavailable, continuing without tools: ${describeError(error)}`); bag = undefined; } }
         if (bag?.tools.length) armDeadline(600000);
         const tools = bag?.tools.map((definition) => ({
           ...definition,

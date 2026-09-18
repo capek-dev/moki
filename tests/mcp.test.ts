@@ -6,7 +6,7 @@ import { FAKE_SERVER_SOURCE, Mcp, mergeToolbags } from '@backend/mcp';
 import type { Toolbag } from '@backend/cua';
 import { Store } from '@backend/store';
 import { describeMcpCall, mcpToolLabel } from '@shared/mcp';
-import { parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix } from '@shared/mcp';
+import { parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix, toolMatchesPattern, compactSchema, TOOL_SCHEMA_BUDGET } from '@shared/mcp';
 
 function freshDir() {
   const dir = mkdtempSync(join(tmpdir(), 'moki-mcp-'));
@@ -172,6 +172,38 @@ test('chat labels prettify app-connection tool names and arguments', () => {
   expect(describeMcpCall('x', {})).toBe('');
 });
 
+test('deny globs match exposed or bare names; parse validates the list', () => {
+  expect(toolMatchesPattern('*', 'files__read', 'read')).toBe(true);
+  expect(toolMatchesPattern('read_*', 'files__read_note', 'read_note')).toBe(true);
+  expect(toolMatchesPattern('files__*', 'files__read', 'read')).toBe(true);
+  expect(toolMatchesPattern('read_*', 'files__write_note', 'write_note')).toBe(false);
+  const parsed = parseMcpConfig({ servers: { a: { command: 'x', denyTools: ['move_*', 'exact_name'] } } });
+  expect(parsed.servers[0].config.denyTools).toEqual(['move_*', 'exact_name']);
+  expect(parseMcpConfig({ servers: { a: { command: 'x', denyTools: 'nope' } } }).diagnostics[0]).toContain('denyTools');
+  expect(parseMcpConfig({ servers: { a: { command: 'x', denyTools: [''] } } }).diagnostics[0]).toContain('denyTools');
+});
+
+test('compactSchema keeps shape and drops prose recursively', () => {
+  const compacted = compactSchema({ type: 'object', description: 'whole-schema prose', properties: { a: { type: 'string', description: 'property prose', enum: ['x', 'y'], title: 'A' }, b: { type: 'object', properties: { c: { type: 'number', description: 'nested prose' } } } }, required: ['a'] });
+  expect(compacted).toEqual({ type: 'object', properties: { a: { type: 'string', enum: ['x', 'y'] }, b: { type: 'object', properties: { c: { type: 'number' } } } }, required: ['a'] });
+  expect(compactSchema(undefined)).toBeUndefined();
+});
+
+test('deny patterns filter tools from state and toolbag alike, and weights are exposed', async () => {
+  const { dir, cleanup } = freshDir();
+  try {
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { notes: fakeServerConfig({ denyTools: ['read_note*'] }) } }));
+    const mcp = new Mcp(dir);
+    const state = await mcp.tools();
+    expect(state.servers[0].tools.map((tool) => tool.name)).toEqual(['notes__read_note_']); // bare 'read_note' denied; the messy one survives
+    expect(state.servers[0].weight).toBeGreaterThan(0);
+    const bag = await mcp.toolbag();
+    expect(bag.tools.map((tool) => tool.name)).toEqual(['notes__read_note_']); // parity: the model sees exactly what Settings shows
+    expect(bag.weights).toEqual([{ label: 'notes', weight: state.servers[0].weight }]);
+    bag.close();
+  } finally { cleanup(); }
+});
+
 test('toolbag lists enabled tools with schemas and filters disabled ones', async () => {
   const { dir, cleanup } = freshDir();
   try {
@@ -235,6 +267,40 @@ test('mergeToolbags routes by name, drops duplicates, and closes every bag', asy
   await expect(merged.execute('nope', {})).rejects.toThrow('Unknown tool.');
   merged.close();
   expect(closed.sort()).toEqual([1, 2]); // close reaches every source, filtered or not
+});
+
+test('over-budget merges demote heavy sources behind search/call meta-tools', async () => {
+  const light: Toolbag = { tools: [{ name: 'light__ping', description: 'Ping.', inputSchema: { type: 'object' } }], weights: [{ label: 'light', weight: 120 }], execute: async () => ({ text: 'pong', isError: false }), close: () => {} };
+  expect(mergeToolbags([light]).tools.map((tool) => tool.name)).toEqual(['light__ping']); // under budget: unchanged, no meta-tools
+  const heavy: Toolbag = {
+    tools: Array.from({ length: 40 }, (_, i) => ({ name: `files__tool_${i}`, description: 'file action', inputSchema: { type: 'object', properties: { q: { type: 'string', description: 'y'.repeat(2000) } } } })),
+    weights: [{ label: 'files', weight: TOOL_SCHEMA_BUDGET }],
+    execute: async (name) => ({ text: `ran:${name}`, isError: false }),
+    close: () => {},
+  };
+  const merged = mergeToolbags([light, heavy]);
+  const names = merged.tools.map((tool) => tool.name);
+  expect(names).toContain('light__ping');       // light source stays fully loaded
+  expect(names).not.toContain('files__tool_0'); // heavy source no longer ships upfront
+  expect(names).toContain('search_tools');      // ...it moved behind the meta-tools
+  expect(names).toContain('call_tool');
+  // Search finds a demoted tool and returns its schema for the model to use.
+  const found = await merged.execute('search_tools', { query: 'tool_7' });
+  expect(found.isError).toBe(false);
+  expect(found.text).toContain('files__tool_7');
+  expect(found.text).toContain('"type":"object"');
+  // call_tool routes to the owning bag, which still executes normally.
+  expect((await merged.execute('call_tool', { name: 'files__tool_7', arguments: { q: 'x' } })).text).toBe('ran:files__tool_7');
+  // Unknown names and missing queries give the model actionable errors.
+  expect((await merged.execute('call_tool', { name: 'nope' })).isError).toBe(true);
+  expect((await merged.execute('search_tools', {})).isError).toBe(true);
+  const none = await merged.execute('search_tools', { query: 'zzzznothing' });
+  expect(none.isError).toBe(false); // a normal "nothing found", not a failure
+  expect(none.text).toContain('No matching');
+  merged.close();
+  // A real tool named like a meta-tool wins; the meta name moves aside.
+  const collide: Toolbag = { tools: [{ name: 'search_tools', description: 'real tool', inputSchema: { type: 'object' } }], weights: [{ label: 'c', weight: 50 }], execute: async () => ({ text: '', isError: false }), close: () => {} };
+  expect(mergeToolbags([collide, heavy]).tools.map((tool) => tool.name)).toContain('search_tools_moki');
 });
 
 test('http connections fetch catalogs, carry auth headers, and reuse session ids', async () => {

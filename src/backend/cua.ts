@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { requireCuaToolName } from '@shared/cua';
+import { compactSchema, schemaWeight, type ToolWeightLabel } from '@shared/mcp';
 import type { CuaState, CuaTool } from '@shared/protocol';
 import type { Store } from '@backend/store';
 
@@ -17,8 +18,11 @@ export interface CuaTransport { listTools(): Promise<CuaCatalog> }
 // A tool definition handed to the model: schema plus the record/execute wrapper.
 export interface AgentToolDef { name: string; description: string; inputSchema: Record<string, unknown> }
 // Per-turn execution bag: the filtered tool list plus name-based dispatch.
+// `weights` attributes the prompt cost per source label so an over-budget
+// merged bag can name its offenders (plan 18).
 export interface Toolbag {
   tools: AgentToolDef[];
+  weights?: readonly ToolWeightLabel[];
   execute(name: string, args: unknown): Promise<{ text: string; isError: boolean }>;
   close(): void;
 }
@@ -179,14 +183,19 @@ export class CuaSession {
 // is cached in memory so `setTool` responses stay complete without a new spawn.
 // A persisted master switch disconnects the integration: while off, no
 // transport is spawned at all and the state reports enabled=false, not an error.
+// What the model receives for one Cua tool: the compacted schema (prose
+// dropped, shape kept — see compactSchema) with its description. Weights count
+// this shipped shape, so Settings and the prompt agree on cost.
+const shippedCua = (tool: CuaInternalTool): AgentToolDef => ({ name: tool.name, description: tool.description, inputSchema: compactSchema(tool.inputSchema) ?? { type: 'object' } });
+
 export class Cua {
   private cache?: { version: string; tools: CuaInternalTool[] };
   constructor(private store: Store, private transport: CuaTransport = mcpTransport()) {}
   private view(disabled: string[], error: string | null): CuaState {
     const enabled = this.store.cuaIntegrationEnabled();
-    return this.cache && enabled
-      ? { enabled: true, connected: true, version: this.cache.version, tools: this.cache.tools.map(({ name, description }) => ({ name, description })), disabled, error }
-      : { enabled, connected: false, version: null, tools: [], disabled, error };
+    if (!this.cache || !enabled) return { enabled, connected: false, version: null, tools: [], disabled, error, weight: 0 };
+    const active = this.cache.tools.filter((tool) => !disabled.includes(tool.name));
+    return { enabled: true, connected: true, version: this.cache.version, tools: this.cache.tools.map(({ name, description }) => ({ name, description })), disabled, error, weight: schemaWeight(active.map(shippedCua)) };
   }
   async tools(): Promise<CuaState> {
     const disabled = this.store.cuaDisabledTools();
@@ -220,11 +229,11 @@ export class Cua {
     if (enabled && !this.cache) await this.tools();
     const available = enabled ? this.cache?.tools ?? [] : [];
     const disabled = new Set(this.store.cuaDisabledTools());
+    const active = available.filter((tool) => !disabled.has(tool.name));
     const session = new CuaSession();
     return {
-      tools: available
-        .filter((tool) => !disabled.has(tool.name))
-        .map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema ?? { type: 'object' } })),
+      tools: active.map(shippedCua),
+      weights: [{ label: 'Cua Driver', weight: schemaWeight(active.map(shippedCua)) }],
       execute: (name, args) => session.call(name, args),
       close: () => session.close(),
     };

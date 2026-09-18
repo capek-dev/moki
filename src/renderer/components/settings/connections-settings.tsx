@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { CuaState, McpState, McpServerState } from '@shared/protocol';
+import { formatWeight, TOOL_SCHEMA_BUDGET } from '@shared/mcp';
 import { Button } from '@renderer/components/ui/button';
 import { Field, Input } from '@renderer/components/ui/field';
 import { Banner, Panel } from '@renderer/components/ui/panel';
@@ -17,10 +18,10 @@ interface ToolEntry { name: string; description: string }
 // One connection card: name, status, master switch, optional actions, and the
 // per-tool switch list. The built-in Cua Driver entry and every user-added
 // connection render through it, so the whole view speaks one language.
-function ConnectionCard({ name, subtitle, status, on, dotOn, switchDisabled, onToggle, headerActions, note, connected, tools, disabledTools, toolsDisabled, onToggleTool, toolWord }: {
+function ConnectionCard({ name, subtitle, status, on, dotOn, switchDisabled, onToggle, headerActions, note, connected, tools, disabledTools, toolsDisabled, onToggleTool, toolWord, weight }: {
   name: string; subtitle?: string; status: string; on: boolean; dotOn: boolean; switchDisabled: boolean; onToggle: () => void;
   headerActions?: ReactNode; note?: ReactNode; connected: boolean; tools: ToolEntry[]; disabledTools: string[];
-  toolsDisabled: boolean; onToggleTool: (tool: string, nextEnabled: boolean) => void; toolWord: string;
+  toolsDisabled: boolean; onToggleTool: (tool: string, nextEnabled: boolean) => void; toolWord: string; weight?: number;
 }) {
   const enabledCount = tools.length - disabledTools.length;
   return <div className="grid gap-2 rounded-xl border border-ink-3/25 px-3 py-2.5">
@@ -40,7 +41,7 @@ function ConnectionCard({ name, subtitle, status, on, dotOn, switchDisabled, onT
     </div>
     {note}
     {connected && <>
-      <p className="text-[12px] text-ink-3">{enabledCount} of {tools.length} {toolWord} available to Moki.</p>
+      <p className="text-[12px] text-ink-3">{enabledCount} of {tools.length} {toolWord} available to Moki{weight ? ` · about ${formatWeight(weight)}` : ''}.</p>
       <ul className="grid max-h-56 gap-0.5 overflow-y-auto pr-1" aria-label={`${name} tools`}>
         {tools.map((tool) => {
           const enabled = !disabledTools.includes(tool.name);
@@ -201,6 +202,10 @@ export function ConnectionsSettings() {
     } finally { setPending(''); }
   }
   const servers = mcp?.servers ?? [];
+  // Plan 18: the same budget the reply turn enforces, surfaced as plain
+  // guidance before a send ever fails.
+  const totalWeight = (cua?.connected ? cua.weight : 0) + servers.reduce((sum, server) => sum + (server.connected ? server.weight : 0), 0);
+  const overBudget = totalWeight > TOOL_SCHEMA_BUDGET;
   const cuaStatus = !cua ? (cuaBusy ? 'Checking…' : 'Not connected')
     : !cua.enabled ? 'Off'
     : cua.connected ? `Connected · ${cua.version || 'unknown version'}`
@@ -211,6 +216,7 @@ export function ConnectionsSettings() {
         <h3 className="text-[13.5px] font-semibold">Connections</h3>
         <p className="mt-0.5 text-[12.5px] text-ink-3">Cua Driver plus the apps you connect. You control every connection and every action.</p>
       </div>
+      {overBudget && <p className="text-[12.5px] text-ink-2" role="note">Many tools are connected. Moki loads the largest connections on demand, which adds a small step when it uses them. Turning off connections you rarely use keeps replies quickest.</p>}
       {mcp && servers.length === 0 && !cua && <p className="text-[12.5px] text-ink-2" role="status">Checking connections…</p>}
       <div className="grid gap-3">
         <ConnectionCard
@@ -227,6 +233,7 @@ export function ConnectionsSettings() {
           toolsDisabled={!!pending}
           onToggleTool={(tool, enabled) => void toggleCuaTool(tool, enabled)}
           toolWord="tools"
+          weight={cua?.weight ?? 0}
           note={cua && !cua.enabled
             ? <p className="text-[12.5px] text-ink-2">Moki is disconnected from Cua Driver. The driver is never contacted and its tools stay hidden from the agent. Your per-tool filters are kept for when you reconnect.</p>
             : cua?.enabled && !cua.connected
@@ -309,6 +316,7 @@ function ServerCard({ server, pending, signingIn, mcpBusy, onSetServer, onToggle
     toolsDisabled={!!pending}
     onToggleTool={(tool, enabled) => void onToggleTool(server.name, tool, enabled)}
     toolWord="actions"
+    weight={server.weight}
     headerActions={<>
       {server.transport === 'http' && server.signedIn && server.enabled && <button type="button" onClick={() => void onSignOut(server.name)} disabled={!!pending} className="cursor-pointer rounded-md px-1.5 py-1 text-[11.5px] text-ink-3 transition-colors hover:text-ink disabled:pointer-events-none disabled:opacity-45">Sign out</button>}
       <button type="button" onClick={() => void onRemove(server.name)} disabled={!!pending} aria-label={`Remove ${server.name}`} className="cursor-pointer rounded-md px-1.5 py-1 text-[11.5px] text-ink-3 transition-colors hover:text-danger disabled:pointer-events-none disabled:opacity-45">Remove</button>
