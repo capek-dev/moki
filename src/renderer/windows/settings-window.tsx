@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Assistant, Result, Snapshot } from '@shared/protocol';
 import { ProviderSettings } from '@renderer/components/settings/provider-settings';
-import { CuaSettings } from '@renderer/components/settings/cua-settings';
-import { McpSettings } from '@renderer/components/settings/mcp-settings';
+import { ConnectionsSettings } from '@renderer/components/settings/connections-settings';
 import { AppearancePreview } from '@renderer/components/settings/appearance-preview';
 import { INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
 import { mokiAssistant } from '@renderer/lib/moki';
@@ -96,8 +95,7 @@ export function Settings() {
           <h2 className="text-[15px] font-semibold">Integrations</h2>
           <p className="text-[13px] text-ink-2">Moki's MCP connections and access permissions will be managed here.</p>
         </Panel>
-        <CuaSettings />
-        <McpSettings />
+        <ConnectionsSettings />
       </div>}
     </section>
     {error && <div className="px-4 pb-4">
