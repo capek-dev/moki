@@ -1,131 +1,52 @@
-// Push-to-talk dictation (plan 17 phase B): a thin, typed wrapper over the
-// Web Speech API living in the renderer. macOS ships local dictation models,
-// so recognition works offline with no accounts and nothing leaves the
-// machine. This module stays pure-testable: no DOM globals at module scope
-// (only inside functions), so the settings-window VM harness never trips on
-// it and the renderer lint rules stay satisfied.
+// Dictation protocol shared by the native helper, the Electron service, and
+// the renderer (plan 17 phase B). The engine is a small Swift binary
+// (src/native/moki-dictate.swift) using SFSpeechRecognizer, spawned by the
+// main process; the Web Speech API was abandoned because Electron's Chromium
+// ships without Google's speech backend, so recognition uploads always fail.
+// This module stays pure (JSON parsing and string mapping only) so the
+// settings-window VM harness and renderer lint rules stay clean.
 
-export interface DictationEvent { transcript: string; final: boolean }
-export interface DictationSession { stop(): void }
+// One stdout line from the helper. Error lines carry a short code the
+// renderer maps to a friendly message.
+export type HelperLine =
+  | { type: 'partial'; text: string }
+  | { type: 'final'; text: string }
+  | { type: 'error'; message: string };
 
-export interface DictationControl {
-  start(onEvent: (event: DictationEvent) => void, onError: (message: string) => void): DictationSession | null;
+export function parseHelperLine(line: string): HelperLine | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const candidate = parsed as { type?: unknown; text?: unknown; message?: unknown };
+  if (candidate.type === 'partial' || candidate.type === 'final') {
+    return typeof candidate.text === 'string' && candidate.text.trim() && candidate.text.length <= 2000
+      ? { type: candidate.type, text: candidate.text.trim() }
+      : null;
+  }
+  if (candidate.type === 'error') {
+    return typeof candidate.message === 'string' && candidate.message.trim() && candidate.message.length <= 100
+      ? { type: 'error', message: candidate.message.trim() }
+      : null;
+  }
+  return null;
 }
 
-interface SpeechRecognitionLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  maxAlternatives: number;
-  onresult: ((event: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
-  abort(): void;
+// Helper error codes mapped to messages the chat window shows. The
+// "System Settings" wording is load-bearing: the error banner matches on it
+// to offer the matching Open Settings shortcut.
+export function mapDictationError(code: string): string {
+  switch (code) {
+    case 'mic-denied':
+      return 'Microphone access was denied. Allow it in System Settings and try again.';
+    case 'speech-denied':
+      return 'Speech recognition was not allowed. Allow Moki in System Settings and try again.';
+    case 'no-mic':
+      return 'No microphone was found. Connect one and try again.';
+    case 'no-speech':
+      return 'No speech was heard. Hold the button and speak.';
+    case 'unavailable':
+      return 'Dictation is not available on this Mac.';
+    default:
+      return 'Dictation stopped. Try again.';
+  }
 }
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
-
-// Looked up lazily: the settings-window VM runs the built bundle without DOM
-// globals, and tests inject a fake through `env`.
-function recognitionConstructor(env: Record<string, unknown>): SpeechRecognitionConstructor | null {
-  const holder = env as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
-  const found = holder.SpeechRecognition ?? holder.webkitSpeechRecognition;
-  return typeof found === 'function' ? found as SpeechRecognitionConstructor : null;
-}
-
-// The state machine, extracted so tests can drive it without a recognizer:
-// finalize-once semantics, stop-idempotence, and error mapping. The renderer
-// owns hold/click gestures; this owns correctness.
-export function createDictationMachine() {
-  let stopped = false;
-  let finished = false;
-  return {
-    // Interim and final results both flow through; the machine keeps the
-    // surface semantics (first finalize wins, later events ignored).
-    handleResult(event: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }, emit: (event: DictationEvent) => void) {
-      for (let index = event.resultIndex; index < event.results.length; index++) {
-        const result = event.results[index];
-        const transcript = String(result[0]?.transcript ?? '').trim();
-        if (!transcript) continue;
-        emit({ transcript, final: result.isFinal === true });
-      }
-    },
-    mapError(error: string | undefined): string {
-      switch (error) {
-        case 'not-allowed':
-        case 'service-not-allowed':
-          return 'Microphone access was denied. Allow it in System Settings and try again.';
-        case 'no-speech':
-          return 'No speech was heard. Hold the button and speak after the beep-feel.';
-        case 'aborted':
-          return ''; // user-initiated stop; not an error worth showing
-        default:
-          return error === 'network' ? 'Dictation is unavailable right now. Try again.' : 'Dictation stopped unexpectedly. Try again.';
-      }
-    },
-    // Stop is idempotent; the wrapper calls both end-of-life paths.
-    stop(recognition: SpeechRecognitionLike) {
-      if (stopped) return;
-      stopped = true;
-      try { recognition.stop(); }
-      catch { try { recognition.abort(); } catch { /* already gone */ } }
-    },
-    finalize(): boolean {
-      if (finished) return false;
-      finished = true;
-      return true;
-    },
-  };
-}
-
-// The production control bound to the real Web Speech API.
-export const dictation: DictationControl = {
-  start(onEvent, onError) {
-    const Recognition = recognitionConstructor(globalThis as unknown as Record<string, unknown>);
-    if (!Recognition) { onError('Dictation is not supported in this window.'); return null; }
-    const recognition = new Recognition();
-    recognition.lang = 'en-US';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-    const machine = createDictationMachine();
-    let settled = false;
-    recognition.onresult = (event) => machine.handleResult(event, onEvent);
-    recognition.onerror = (event) => {
-      if (settled) return;
-      const message = machine.mapError(event?.error);
-      if (message) { settled = true; onError(message); }
-    };
-    recognition.onend = () => {
-      if (settled) return;
-      settled = true;
-      if (machine.finalize()) onEvent({ transcript: '', final: true });
-    };
-    // A stuck session (recognizer never fires end) must not hold the mic:
-    // the watchdog ends it after 20s of no events.
-    let lastActivity = Date.now();
-    const touch = () => { lastActivity = Date.now(); };
-    const originalOnResult = recognition.onresult;
-    recognition.onresult = (event) => { touch(); originalOnResult?.(event); };
-    const watchdog = setInterval(() => {
-      if (Date.now() - lastActivity > 20000) {
-        clearInterval(watchdog);
-        machine.stop(recognition);
-      }
-    }, 1000);
-    const teardown = () => { clearInterval(watchdog); };
-    const session: DictationSession = {
-      stop() {
-        teardown();
-        machine.stop(recognition);
-      },
-    };
-    try { recognition.start(); }
-    catch {
-      teardown();
-      return null;
-    }
-    return session;
-  },
-};

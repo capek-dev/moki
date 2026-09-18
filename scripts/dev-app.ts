@@ -1,8 +1,10 @@
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-const DEV_APP_REVISION = '3';
+const DEV_APP_REVISION = '4';
 const SCREEN_CAPTURE_REASON = 'Moki captures a screen region only when you choose Capture region.';
+const MICROPHONE_REASON = 'Moki uses the microphone only while you hold the dictate button.';
+const SPEECH_REASON = 'Moki converts your speech to text so you can dictate messages.';
 
 async function run(command: string, args: string[]) {
   const child = Bun.spawn([command, ...args], { stdout: 'inherit', stderr: 'inherit' });
@@ -32,6 +34,8 @@ export async function prepareDevApp(electronExecutable: string, electronVersion:
   await run('plutil', ['-replace', 'CFBundleName', '-string', 'Moki Dev', plist]);
   await run('plutil', ['-replace', 'CFBundleIdentifier', '-string', 'app.moki.desktop.dev', plist]);
   await run('plutil', ['-replace', 'NSScreenCaptureUsageDescription', '-string', SCREEN_CAPTURE_REASON, plist]);
+  await run('plutil', ['-replace', 'NSMicrophoneUsageDescription', '-string', MICROPHONE_REASON, plist]);
+  await run('plutil', ['-replace', 'NSSpeechRecognitionUsageDescription', '-string', SPEECH_REASON, plist]);
   await run('codesign', ['--force', '--deep', '--sign', '-', targetApp]);
   await writeFile(marker, expected);
   return targetExecutable;

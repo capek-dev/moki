@@ -16,6 +16,14 @@ const api: DesktopAPI = {
     ipcRenderer.on('moki:speech', handler);
     return () => ipcRenderer.removeListener('moki:speech', handler);
   },
+  startDictation: () => ipcRenderer.invoke('moki:start-dictation'),
+  stopDictation: () => ipcRenderer.invoke('moki:stop-dictation'),
+  onDictation: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: Parameters<typeof listener>[0]) => listener(event);
+    ipcRenderer.on('moki:dictation', handler);
+    return () => ipcRenderer.removeListener('moki:dictation', handler);
+  },
+  openSpeechRecognitionSettings: () => ipcRenderer.invoke('moki:speech-recognition-settings'),
   onProviders: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
     ipcRenderer.on('moki:providers-state', handler);
@@ -29,6 +37,7 @@ const api: DesktopAPI = {
   startCapture: () => ipcRenderer.invoke('moki:start-capture'),
   removeCapture: (id) => ipcRenderer.invoke('moki:remove-capture', id),
   openScreenRecordingSettings: () => ipcRenderer.invoke('moki:screen-recording-settings'),
+  openMicrophoneSettings: () => ipcRenderer.invoke('moki:microphone-settings'),
   onCapture: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value);
     ipcRenderer.on('moki:capture', handler);

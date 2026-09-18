@@ -43,6 +43,10 @@ export interface McpState { servers: McpServerState[]; diagnostics: string[] }
 // Spoken replies (plan 17 A): main synthesizes and pushes the speaking state;
 // the renderer only submits text and reacts to events. No polling.
 export interface SpeechState { speaking: boolean }
+// Push-to-talk (plan 17 B): events from the native dictation helper, pushed
+// from main to the window that started the session. `final` with an empty
+// transcript means the session ended cleanly without more text.
+export interface DictationIpcEvent { transcript?: string; final?: boolean; error?: string }
 // Sign-in for web connections runs entirely in Electron main (browser OAuth,
 // encrypted vault); the renderer only starts it and observes the outcome.
 export type McpAuthCommand = { action: 'signIn'; server: string } | { action: 'signOut'; server: string };
@@ -59,6 +63,10 @@ export interface DesktopAPI {
   speak(text: string): Promise<void>;
   stopSpeaking(): Promise<void>;
   onSpeech(listener: (state: SpeechState) => void): () => void;
+  startDictation(): Promise<void>;
+  stopDictation(): Promise<void>;
+  onDictation(listener: (event: DictationIpcEvent) => void): () => void;
+  openSpeechRecognitionSettings(): Promise<void>;
   onProviders(listener: (state: ProviderState) => void): () => void;
   request(request: Request): Promise<Result>;
   openSettings(): Promise<void>;
@@ -68,6 +76,7 @@ export interface DesktopAPI {
   startCapture(): Promise<void>;
   removeCapture(id: string): Promise<void>;
   openScreenRecordingSettings(): Promise<void>;
+  openMicrophoneSettings(): Promise<void>;
   onCapture(listener: (event: CaptureEvent) => void): () => void;
   onState(listener: (result: Result) => void): () => void;
 }

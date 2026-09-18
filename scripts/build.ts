@@ -20,9 +20,25 @@ if (development) {
   await copyFile('src/renderer/index.html', `${out}/renderer/index.html`);
 }
 await bundle({ entrypoints: ['src/backend/index.ts'], compile: { outfile: `${out}/backend/moki-runtime` }, target: 'bun', sourcemap: development ? 'inline' : 'none' });
+// The native dictation helper (plan 17 B) compiles with the system Swift
+// toolchain; its usage-description plist is embedded into the binary so TCC
+// prompts carry the right text even when it runs standalone. The explicit
+// deployment target (macOS 13) keeps the helper runnable on older systems and
+// stops the SDK's own macOS-27 deprecations from firing (one pairs the tap
+// API with a throwing twin Swift can never select).
+if (process.platform === 'darwin') {
+  await mkdir(`${out}/native`, { recursive: true });
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
+  const helper = Bun.spawn(['swiftc', '-O', '-target', `${arch}-apple-macos13.0`, 'src/native/moki-dictate.swift',
+    '-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist', '-Xlinker', 'src/native/moki-dictate.plist',
+    '-o', `${out}/native/moki-dictate`], { stdout: 'inherit', stderr: 'inherit' });
+  if (await helper.exited !== 0) throw new Error('Dictation helper build failed.');
+}
 // Distribution still requires Developer ID signing and notarization.
 if (process.platform === 'darwin') {
   const signing = Bun.spawn(['codesign', '--force', '--sign', '-', `${out}/backend/moki-runtime`], { stdout: 'inherit', stderr: 'inherit' });
   if (await signing.exited !== 0) throw new Error('Local runtime signing failed.');
+  const helperSigning = Bun.spawn(['codesign', '--force', '--sign', '-', `${out}/native/moki-dictate`], { stdout: 'inherit', stderr: 'inherit' });
+  if (await helperSigning.exited !== 0) throw new Error('Local helper signing failed.');
 }
 console.log(development ? 'Built isolated Moki Dev shell and backend.' : 'Built Electron shell, renderer, and standalone Bun 1.4.0 runtime.');

@@ -16,7 +16,7 @@ test('Moki packaging and emitted renderer agree on the new identity', () => {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
   expect(pkg.name).toBe('moki');
   expect(pkg.build).toMatchObject({ appId: 'app.moki.desktop', productName: 'Moki' });
-  expect(pkg.build.extraResources).toEqual([{ from: 'dist/backend/moki-runtime', to: 'backend/moki-runtime' }]);
+  expect(pkg.build.extraResources).toEqual([{ from: 'dist/backend/moki-runtime', to: 'backend/moki-runtime' }, { from: 'dist/native/moki-dictate', to: 'native/moki-dictate' }]);
   expect(readFileSync('dist/renderer/index.html', 'utf8')).toContain('<title>Moki</title>');
 });
 

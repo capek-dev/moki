@@ -4,6 +4,7 @@ import { attachmentDirectories, requireAttachmentId } from '@shared/attachments'
 import { ScreenshotCapture } from '@electron/screenshot-capture';
 import { EncryptedVault, ProviderConnections } from '@electron/provider-connections';
 import { SpeechSynth } from '@electron/speech';
+import { DictationService } from '@electron/dictation-service';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { parseMcpConfig } from '@shared/mcp';
@@ -40,6 +41,7 @@ let providers: ProviderConnections | undefined;
 let mcpAuth: import('@electron/mcp-connections').McpConnections | undefined;
 let capture: ScreenshotCapture | undefined;
 let speech: SpeechSynth | undefined;
+let dictation: DictationService | undefined;
 let quitting = false;
 let shutdownComplete = false;
 // macOS gets real window glass (vibrancy behind translucent panels); other
@@ -127,6 +129,9 @@ else {
     const binary = app.isPackaged
       ? join(process.resourcesPath, 'backend/moki-runtime')
       : join(appRoot, 'dist/backend/moki-runtime');
+    const dictationHelper = app.isPackaged
+      ? join(process.resourcesPath, 'native/moki-dictate')
+      : join(appRoot, 'dist/native/moki-dictate');
     runtime = new Runtime(binary, app.getPath('userData'), broadcast, (message) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:runtime-error', message);
     });
@@ -168,6 +173,7 @@ else {
     speech.onChange((speaking) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:speech', { speaking });
     });
+    dictation = new DictationService();
     providers = new ProviderConnections(new EncryptedVault(join(app.getPath('userData'), 'providers.encrypted'), safeStorage), (url) => shell.openExternal(url), (state) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:providers-state', state);
     });
@@ -209,6 +215,27 @@ else {
     ipcMain.handle('moki:start-capture', (event) => { assertTrusted(event); return capture!.start(); });
     ipcMain.handle('moki:remove-capture', (event, id: unknown) => { assertTrusted(event); capture!.remove(id); });
     ipcMain.handle('moki:screen-recording-settings', (event) => { assertTrusted(event); return capture!.openPermissionSettings(); });
+    ipcMain.handle('moki:microphone-settings', (event) => {
+      assertTrusted(event);
+      if (process.platform !== 'darwin') throw new Error('Microphone settings are managed in your system preferences.');
+      return shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+    });
+    ipcMain.handle('moki:speech-recognition-settings', (event) => {
+      assertTrusted(event);
+      if (process.platform !== 'darwin') throw new Error('Speech settings are managed in your system preferences.');
+      return shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition');
+    });
+    // The native helper owns the mic; events stream back to the window that
+    // started the session (the single chat window).
+    ipcMain.handle('moki:start-dictation', (event) => {
+      assertTrusted(event);
+      const sender = event.sender;
+      dictation!.start(dictationHelper, (push) => { if (!sender.isDestroyed()) sender.send('moki:dictation', push); });
+    });
+    ipcMain.handle('moki:stop-dictation', (event) => {
+      assertTrusted(event);
+      dictation!.stop();
+    });
     ipcMain.handle('moki:request', async (event, input: unknown) => {
       assertTrusted(event);
       // Explicit ingress allowlist blocks private credential-bearing pipe commands.
@@ -286,6 +313,7 @@ else {
     providers?.close();
     mcpAuth?.close();
     speech?.close();
+    dictation?.close();
     void (runtime?.close() ?? Promise.resolve()).finally(() => { shutdownComplete = true; app.quit(); });
   });
 }

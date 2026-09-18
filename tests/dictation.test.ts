@@ -1,61 +1,35 @@
 import { expect, test } from 'bun:test';
-import { createDictationMachine } from '@shared/dictation';
+import { mapDictationError, parseHelperLine } from '@shared/dictation';
 
-function fakeResultEvent(entries: { transcript: string; isFinal: boolean }[]) {
-  return {
-    resultIndex: 0,
-    results: entries.map((entry) => {
-      const alternatives = [{ transcript: entry.transcript }] as ArrayLike<{ transcript: string }>;
-      return Object.assign(alternatives, { isFinal: entry.isFinal });
-    }),
-  };
-}
-
-test('dictation machine forwards interim and final results in order', () => {
-  const machine = createDictationMachine();
-  const events: { transcript: string; final: boolean }[] = [];
-  machine.handleResult(fakeResultEvent([
-    { transcript: 'hello there', isFinal: false },
-    { transcript: 'hello there', isFinal: true },
-  ]), (event) => events.push(event));
-  expect(events).toEqual([
-    { transcript: 'hello there', final: false },
-    { transcript: 'hello there', final: true },
-  ]);
+test('helper lines parse into typed events', () => {
+  expect(parseHelperLine('{"type":"partial","text":"hello there"}')).toEqual({ type: 'partial', text: 'hello there' });
+  expect(parseHelperLine('{"type":"final","text":"hello there"}')).toEqual({ type: 'final', text: 'hello there' });
+  expect(parseHelperLine('{"type":"error","message":"mic-denied"}')).toEqual({ type: 'error', message: 'mic-denied' });
 });
 
-test('empty transcripts are dropped, not emitted as phantom events', () => {
-  const machine = createDictationMachine();
-  const events: { transcript: string; final: boolean }[] = [];
-  machine.handleResult(fakeResultEvent([{ transcript: '   ', isFinal: false }]), (event) => events.push(event));
-  expect(events).toEqual([]);
+test('malformed lines are dropped, never thrown', () => {
+  expect(parseHelperLine('not json')).toBeNull();
+  expect(parseHelperLine('{}')).toBeNull();
+  expect(parseHelperLine('{"type":"partial"}')).toBeNull(); // missing text
+  expect(parseHelperLine('{"type":"partial","text":"   "}')).toBeNull(); // blank text
+  expect(parseHelperLine('{"type":"final","text":"x"}extra')).toBeNull();
+  expect(parseHelperLine('{"type":"partial","text":"x","extra":1}')).toEqual({ type: 'partial', text: 'x' }); // unknown fields tolerated
+  expect(parseHelperLine('{"type":"surprise","text":"x"}')).toBeNull();
+  expect(parseHelperLine('')).toBeNull();
 });
 
-test('error mapping: permission, no-speech, aborted, network, unknown', () => {
-  const machine = createDictationMachine();
-  expect(machine.mapError('not-allowed')).toContain('Microphone access was denied');
-  expect(machine.mapError('no-speech')).toContain('No speech was heard');
-  expect(machine.mapError('aborted')).toBe('');
-  expect(machine.mapError('network')).toContain('unavailable right now');
-  expect(machine.mapError('audio-capture')).toContain('stopped unexpectedly');
+test('oversized payloads are rejected', () => {
+  expect(parseHelperLine(`{"type":"partial","text":"${'x'.repeat(2001)}"}`)).toBeNull();
+  expect(parseHelperLine(`{"type":"error","message":"${'x'.repeat(101)}"}`)).toBeNull();
 });
 
-test('stop is idempotent and falls back to abort when stop() throws', () => {
-  const machine = createDictationMachine();
-  let stops = 0;
-  let aborts = 0;
-  const recognition = {
-    stop() { stops++; if (stops === 1) throw new Error('already stopped'); },
-    abort() { aborts++; },
-  };
-  machine.stop(recognition as never);
-  machine.stop(recognition as never);
-  expect(stops).toBe(1);
-  expect(aborts).toBe(1);
-});
-
-test('finalize fires exactly once', () => {
-  const machine = createDictationMachine();
-  expect(machine.finalize()).toBe(true);
-  expect(machine.finalize()).toBe(false);
+test('error codes map to friendly, actionable messages', () => {
+  expect(mapDictationError('mic-denied')).toContain('Microphone access was denied');
+  expect(mapDictationError('mic-denied')).toContain('System Settings');
+  expect(mapDictationError('speech-denied')).toContain('Speech recognition was not allowed');
+  expect(mapDictationError('speech-denied')).toContain('System Settings');
+  expect(mapDictationError('no-mic')).toContain('No microphone was found');
+  expect(mapDictationError('no-speech')).toContain('No speech was heard');
+  expect(mapDictationError('unavailable')).toContain('not available on this Mac');
+  expect(mapDictationError('anything-else')).toContain('Dictation stopped');
 });

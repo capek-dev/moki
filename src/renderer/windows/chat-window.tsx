@@ -16,7 +16,7 @@ import { SimpleSelect } from '@renderer/components/ui/select';
 import { canChatWithMoki, mokiAssistant } from '@renderer/lib/moki';
 import { Banner } from '@renderer/components/ui/panel';
 import { ArrowUp, Capture, Clock, Gear, Mic, Pencil, Plus, Speaker, Stop, Undo, Zap } from '@renderer/components/ui/icons';
-import { dictation, type DictationSession } from '@shared/dictation';
+import { mapDictationError } from '@shared/dictation';
 
 const AUTO_THINKING = 'auto';
 
@@ -66,7 +66,12 @@ export function App() {
   // lands in the draft. Click-toggle works too for anyone who never finds the
   // hold gesture.
   const [dictating, setDictating] = useState(false);
-  const dictationSession = useRef<DictationSession | null>(null);
+  // Session bookkeeping for the native helper: the draft/edit text captured
+  // when the hold began, and when the last session stopped (late finals from
+  // the helper are accepted for a short grace window, older strays ignored).
+  const dictationBase = useRef({ editingId: '', text: '' });
+  const dictationStoppedAt = useRef(0);
+  const draftKeyRef = useRef('');
   const lock = useRef(false);
   const scroller = useRef<HTMLElement>(null);
   // Which streaming reply has had how much speakable text spoken already
@@ -83,6 +88,7 @@ export function App() {
   const running = messages.some((m) => m.status === 'streaming');
   const loaded = !!conversationId && state.histories[conversationId] !== undefined;
   const draftKey = conversationId ?? `new:${assistant?.id ?? 'moki'}`;
+  draftKeyRef.current = draftKey;
   const draft = drafts[draftKey] ?? '';
   const body = editing ? editing.text : draft;
   const models = MODELS.filter((item) => item.provider === assistant?.provider);
@@ -179,11 +185,23 @@ export function App() {
       setError(message); setRuntimeFailed(true); setStarting(false);
       setState((previous) => ({ ...previous, data: previous.data && { ...previous.data, messages: previous.data.messages.map((m) => m.status === 'streaming' ? { ...m, status: 'interrupted' } : m) } }));
     });
+    const unsubscribeDictation = window.moki.onDictation((event) => {
+      if (event.error) {
+        setDictating(false);
+        dictationStoppedAt.current = Date.now();
+        const message = mapDictationError(event.error);
+        if (message) setError(message);
+        return;
+      }
+      if (event.final) setDictating(false);
+      const text = event.transcript ?? '';
+      if (text) applyDictation(text);
+    });
     void perform({ method: 'snapshot' }).then((result) => {
       const initial = mokiAssistant(result?.snapshot.assistants);
       setConversationId(result?.snapshot.conversations.find((item) => item.assistantId === initial?.id)?.id);
     });
-    return () => { unsubscribe(); unsubscribeCapture(); unsubscribeError(); };
+    return () => { unsubscribe(); unsubscribeCapture(); unsubscribeError(); unsubscribeDictation(); };
   }, []);
   useEffect(() => {
     nearBottom.current = true;
@@ -258,27 +276,27 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturing]);
   function stopDictation() {
-    dictationSession.current?.stop();
-    dictationSession.current = null;
+    dictationStoppedAt.current = Date.now();
+    void window.moki.stopDictation().catch(() => {});
     setDictating(false);
   }
   function startDictation() {
     if (!writable || runtimeFailed || dictating) return;
-    const base = editing ? '' : draft;
-    const session = dictation.start((event) => {
-      if (event.final && !event.transcript) return; // session ended cleanly
-      if (event.final) { stopDictation(); return; }
-      const spoken = event.transcript;
-      if (!spoken) return;
-      if (editing) setEditing((current) => current && { ...current, text: current.text + (current.text && !current.text.endsWith(' ') ? ' ' : '') + spoken });
-      else setDrafts((current) => ({ ...current, [draftKey]: (base ? base + ' ' : '') + spoken }));
-    }, (message) => {
-      stopDictation();
-      setError(message);
-    });
-    if (!session) { setError('Dictation is unavailable in this window.'); return; }
-    dictationSession.current = session;
-    setDictating(true);
+    dictationBase.current = editing ? { editingId: editing.id, text: editing.text } : { editingId: '', text: draft };
+    dictationStoppedAt.current = 0;
+    void window.moki.startDictation().then(() => setDictating(true)).catch((e) => setError(e instanceof Error ? e.message : 'Dictation is unavailable.'));
+  }
+  // Partial and final transcripts both rewrite base + spoken, so the final
+  // result replaces interim guesses instead of appending to them.
+  function applyDictation(text: string) {
+    const base = dictationBase.current;
+    if (base.editingId) {
+      const editing = editingRef.current;
+      if (!editing || editing.id !== base.editingId) return; // target changed mid-dictation
+      setEditing({ ...editing, text: (base.text ? base.text + ' ' : '') + text });
+    } else {
+      setDrafts((current) => ({ ...current, [draftKeyRef.current]: (base.text ? base.text + ' ' : '') + text }));
+    }
   }
   async function stop() {
     stopDictation();
@@ -360,6 +378,10 @@ export function App() {
     {error && <div className="px-3 pb-2">
       <Banner action={error.includes('Screen Recording')
         ? <Button variant="secondary" size="sm" onClick={() => void window.moki.openScreenRecordingSettings()}>Open Settings</Button>
+        : error.includes('Microphone access was denied')
+        ? <Button variant="secondary" size="sm" onClick={() => void window.moki.openMicrophoneSettings()}>Open Settings</Button>
+        : error.includes('Speech recognition was not allowed')
+        ? <Button variant="secondary" size="sm" onClick={() => void window.moki.openSpeechRecognitionSettings()}>Open Settings</Button>
         : !data ? <Button variant="secondary" size="sm" disabled={busy} onClick={() => void perform({ method: 'snapshot' })}>Retry connection</Button> : undefined}>{error}</Banner>
     </div>}
     {/* Composer owns the session config: model and thinking are quiet chips

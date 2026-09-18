@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>app.moki.dictation</string>
+	<key>CFBundleName</key>
+	<string>moki-dictate</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Moki uses the microphone only while you hold the dictate button.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Moki converts your speech to text so you can dictate messages.</string>
+</dict>
+</plist>

@@ -55,13 +55,18 @@
     "extraResources": [{
       "from": "dist/backend/moki-runtime",
       "to": "backend/moki-runtime"
+    }, {
+      "from": "dist/native/moki-dictate",
+      "to": "native/moki-dictate"
     }],
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg"],
       "identity": null,
       "extendInfo": {
-        "NSScreenCaptureUsageDescription": "Moki captures a screen region only when you choose Capture region."
+        "NSScreenCaptureUsageDescription": "Moki captures a screen region only when you choose Capture region.",
+        "NSMicrophoneUsageDescription": "Moki uses the microphone only while you hold the dictate button.",
+        "NSSpeechRecognitionUsageDescription": "Moki converts your speech to text so you can dictate messages."
       }
     }
   }
