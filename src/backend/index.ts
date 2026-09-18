@@ -3,7 +3,8 @@ import { databasePath } from '@shared/data-paths';
 import { createInterface } from 'node:readline';
 import { Store } from '@backend/store';
 import { Chat } from '@backend/chat';
-import { Cua, mcpTransport } from '@backend/cua';
+import { Cua, mcpTransport, type Toolbag } from '@backend/cua';
+import { Mcp, mergeToolbags } from '@backend/mcp';
 import { generate } from '@backend/model-stream';
 import type { Result } from '@shared/protocol';
 // Import the published composition entry point in the compiled runtime proof.
@@ -15,8 +16,18 @@ mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 const store = new Store(databasePath(dataDir), dataDir);
 let revision = 0;
 const stamp = (result: Result) => ({ ...result, revision: ++revision });
-const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ event: 'state', result: stamp(result) })), (signal) => cua.toolbag(signal));
+const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ event: 'state', result: stamp(result) })), async (signal) => {
+  // Each source degrades independently: one broken connection never removes
+  // the other's tools from the turn.
+  const bags: Toolbag[] = [];
+  for (const load of [() => cua.toolbag(signal), () => mcp.toolbag(signal)]) {
+    try { bags.push(await load()); }
+    catch (error) { console.error(`[moki] tool source unavailable, continuing without it: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  return mergeToolbags(bags);
+});
 const cua = new Cua(store, mcpTransport());
+const mcp = new Mcp(dataDir);
 // Catalog fetches spawn a short-lived MCP transport, so these complete async;
 // responses carry their request id and the runtime matches them in any order.
 async function handleCua(id: string, request: { method: 'cuaTools' } | { method: 'cuaSetTool'; tool: unknown; disabled: unknown } | { method: 'cuaSetEnabled'; enabled: unknown }) {
@@ -24,6 +35,14 @@ async function handleCua(id: string, request: { method: 'cuaTools' } | { method:
     : request.method === 'cuaSetTool' ? cua.setTool(request)
     : cua.setEnabled(request);
   console.log(JSON.stringify({ id, result: stamp({ snapshot: store.snapshot(), cua: state }) }));
+}
+// Same async shape for user-added MCP servers; config reads/writes and stdio
+// catalog fetches never block the pipe.
+async function handleMcp(id: string, request: { method: 'mcpTools' } | { method: 'mcpSetServer'; server: unknown; enabled: unknown } | { method: 'mcpSetTool'; server: unknown; tool: unknown; disabled: unknown }) {
+  const state = request.method === 'mcpTools' ? await mcp.tools()
+    : request.method === 'mcpSetServer' ? mcp.setServer(request.server, request.enabled)
+    : mcp.setTool(request.server, request.tool, request.disabled);
+  console.log(JSON.stringify({ id, result: stamp({ snapshot: store.snapshot(), mcp: state }) }));
 }
 const inFlightCua = new Set<Promise<void>>();
 console.log(JSON.stringify({ event: 'ready', bun: Bun.version, capekExports: Object.keys(capek).length }));
@@ -38,6 +57,14 @@ lines.on('line', (line) => {
     const request = envelope.request;
     if (request?.method === 'cuaTools' || request?.method === 'cuaSetTool' || request?.method === 'cuaSetEnabled') {
       const task = handleCua(id as string, request).catch((error) => {
+        console.log(JSON.stringify({ id, error: error instanceof Error ? error.message : 'Request failed.' }));
+      });
+      inFlightCua.add(task);
+      void task.then(() => inFlightCua.delete(task));
+      return;
+    }
+    if (request?.method === 'mcpTools' || request?.method === 'mcpSetServer' || request?.method === 'mcpSetTool') {
+      const task = handleMcp(id as string, request).catch((error) => {
         console.log(JSON.stringify({ id, error: error instanceof Error ? error.message : 'Request failed.' }));
       });
       inFlightCua.add(task);

@@ -42,7 +42,7 @@ export function createGenerate(fetcher: typeof fetch = fetch): Generate {
     };
   }
   signal.throwIfAborted();
-  // Enabled Cua tools run inline with the reply; the step bound keeps a
+  // Enabled agent tools (Cua Driver plus connected apps) run inline with the reply; the step bound keeps a
   // tool-looping model from running away past the reply deadline.
   const modelTools = turn.tools && turn.tools.length
     ? Object.fromEntries(turn.tools.map((entry) => [entry.name, tool({

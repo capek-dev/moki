@@ -5,6 +5,7 @@ import type { Attachment, Provider, Result, Message, ToolCallRecord } from '@sha
 import { requireAttachmentId } from '@shared/attachments';
 import type { Toolbag } from '@backend/cua';
 import { cuaToolLabel, describeCuaCall } from '@shared/cua';
+import { describeMcpCall, mcpToolLabel } from '@shared/mcp';
 
 // Terminal diagnostics: the full error chain for the host process stderr.
 // Never surfaced to the renderer; credentials do not travel in error objects.
@@ -94,17 +95,20 @@ export class Chat {
     const armDeadline = (ms: number) => { clearTimeout(deadline); deadline = setTimeout(() => { abort.abort(); finish('failed', 'Reply timed out. You can send a new message.'); }, ms); };
     armDeadline(180000);
     this.active.set(id, { abort, finish: () => finish('interrupted') });
-    // Start after the request has been acknowledged. Enabled Cua tools run
-    // inline through one lazily spawned session that finish() always closes.
+    // Start after the request has been acknowledged. Enabled tools (Cua Driver
+    // plus connected apps) run inline through lazily spawned sessions that
+    // finish() always closes.
     queueMicrotask(() => { void (async () => {
       try {
-        if (this.toolSource) { try { bag = await this.toolSource(abort.signal); } catch (error) { console.error(`[moki] cua toolbag unavailable, continuing without tools: ${describeError(error)}`); bag = undefined; } }
+        if (this.toolSource) { try { bag = await this.toolSource(abort.signal); } catch (error) { console.error(`[moki] tool source unavailable, continuing without tools: ${describeError(error)}`); bag = undefined; } }
         if (bag?.tools.length) armDeadline(600000);
         const tools = bag?.tools.map((definition) => ({
           ...definition,
           execute: async (args: unknown): Promise<string> => {
             abort.signal.throwIfAborted();
-            const entry: ToolCallRecord = { name: definition.name, label: cuaToolLabel(definition.name), detail: describeCuaCall(definition.name, args), summary: null, status: 'running', at: Date.now() };
+            // App-connection tools carry a `__` prefix separator; Cua names do not.
+            const appTool = definition.name.includes('__');
+            const entry: ToolCallRecord = { name: definition.name, label: appTool ? mcpToolLabel(definition.name) : cuaToolLabel(definition.name), detail: appTool ? describeMcpCall(definition.name, args) : describeCuaCall(definition.name, args), summary: null, status: 'running', at: Date.now() };
             toolCalls.push(entry);
             if (!timer) timer = setTimeout(flush, 60);
             try {

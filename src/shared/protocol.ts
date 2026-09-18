@@ -20,8 +20,11 @@ export type Request =
   | { method: 'revertMessage'; conversationId: string; messageId: string }
   | { method: 'cuaTools' }
   | { method: 'cuaSetTool'; tool: string; disabled: boolean }
-  | { method: 'cuaSetEnabled'; enabled: boolean };
-export interface Result { snapshot: Snapshot; conversationId?: string; revision?: number; cua?: CuaState }
+  | { method: 'cuaSetEnabled'; enabled: boolean }
+  | { method: 'mcpTools' }
+  | { method: 'mcpSetServer'; server: string; enabled: boolean }
+  | { method: 'mcpSetTool'; server: string; tool: string; disabled: boolean };
+export interface Result { snapshot: Snapshot; conversationId?: string; revision?: number; cua?: CuaState; mcp?: McpState }
 export type ProviderCommand =
   | { action: 'status' | 'startCodex' | 'cancelCodex' }
   | { action: 'saveDeepseek'; key: string }
@@ -30,6 +33,11 @@ export type ProviderCommand =
 export interface ProviderState { error?: string; revision: number; deepseek: { connected: boolean }; codex: { connected: boolean }; signingIn: boolean }
 export interface CuaTool { name: string; description: string }
 export interface CuaState { enabled: boolean; connected: boolean; version: string | null; tools: CuaTool[]; disabled: string[]; error: string | null }
+// User-added MCP connections (config file is the source of truth). Tool names
+// are the prefixed, model-facing ones (`server__tool`).
+export interface McpTool { name: string; description: string }
+export interface McpServerState { name: string; transport: 'stdio' | 'http'; enabled: boolean; connected: boolean; tools: McpTool[]; disabledTools: string[]; error: string | null }
+export interface McpState { servers: McpServerState[]; diagnostics: string[] }
 // One agent tool invocation attached to an assistant reply. `label` is the
 // friendly phrase, `detail` the argument digest, `summary` the result digest.
 export interface ToolCallRecord { name: string; label: string; detail: string; summary: string | null; status: 'running' | 'ok' | 'failed'; at: number }
