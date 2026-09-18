@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { AttachmentDraft, Message, Request, Result } from '@shared/protocol';
 import { MODELS, defaultModel, supportsImageInput, thinkingLevels, type Thinking } from '@shared/models';
 import { estimateContextUsage } from '@shared/context';
+import { speechSegments } from '@shared/speech';
 import { AttachmentImage } from '@renderer/components/chat/attachment-image';
 import { applyResult, type ChatState } from '@renderer/lib/chat-state';
 import { Companion, INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
@@ -14,7 +15,8 @@ import { Button } from '@renderer/components/ui/button';
 import { SimpleSelect } from '@renderer/components/ui/select';
 import { canChatWithMoki, mokiAssistant } from '@renderer/lib/moki';
 import { Banner } from '@renderer/components/ui/panel';
-import { ArrowUp, Capture, Clock, Gear, Pencil, Plus, Stop, Undo, Zap } from '@renderer/components/ui/icons';
+import { ArrowUp, Capture, Clock, Gear, Mic, Pencil, Plus, Speaker, Stop, Undo, Zap } from '@renderer/components/ui/icons';
+import { dictation, type DictationSession } from '@shared/dictation';
 
 const AUTO_THINKING = 'auto';
 
@@ -56,8 +58,20 @@ export function App() {
   const [editing, setEditing] = useState<{ id: string; text: string }>();
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState('');
+  // Spoken replies (plan 17 A): default on for the companion moment, one
+  // click to mute forever; the choice persists locally.
+  const [speakReplies, setSpeakReplies] = useState(() => { try { return localStorage.getItem('moki:speak-replies') !== 'off'; } catch { return true; } });
+  const [speaking, setSpeaking] = useState(false);
+  // Push-to-talk (plan 17 B): hold the mic button to dictate; the transcript
+  // lands in the draft. Click-toggle works too for anyone who never finds the
+  // hold gesture.
+  const [dictating, setDictating] = useState(false);
+  const dictationSession = useRef<DictationSession | null>(null);
   const lock = useRef(false);
   const scroller = useRef<HTMLElement>(null);
+  // Which streaming reply has had how much speakable text spoken already
+  // (character offset into the append-only segment stream).
+  const spokenRef = useRef({ id: '', chars: 0 });
   const nearBottom = useRef(true);
   const composer = useRef<HTMLTextAreaElement>(null);
   const assistant = mokiAssistant(data?.assistants);
@@ -95,6 +109,37 @@ export function App() {
   const editingRef = useRef(editing); editingRef.current = editing;
   useTone(appearance.palette);
   useEffect(() => { rememberPalette(appearance.palette); }, [appearance.palette]);
+  useEffect(() => window.moki.onSpeech((state) => setSpeaking(state.speaking)), []);
+  // Complete sentences stream to the synthesizer as the reply grows; the
+  // finished reply flushes its remainder. Tracking is a character offset
+  // into the speakable prefix (segments are append-only), so every new
+  // sentence ships exactly once. Interrupted and failed replies stay silent
+  // after the cut, matching the Stop semantics. A new reply cuts off any
+  // leftover audio from the previous one.
+  useEffect(() => {
+    if (!speakReplies) return;
+    const active = messages.find((m) => m.role === 'assistant' && m.status === 'streaming')
+      ?? (spokenRef.current.id ? messages.find((m) => m.id === spokenRef.current.id && m.status === 'complete') : undefined);
+    if (!active) return;
+    const flush = active.status === 'complete';
+    const segments = speechSegments(active.text, { flush });
+    const tracker = spokenRef.current;
+    if (tracker.id !== active.id) {
+      if (!flush) {
+        if (tracker.id) void window.moki.stopSpeaking().catch(() => {});
+        tracker.id = active.id; tracker.chars = 0;
+      } else return;
+    }
+    const spoken = segments.join(' ');
+    const fresh = spoken.slice(tracker.chars);
+    if (!fresh.trim()) return;
+    tracker.chars = spoken.length;
+    // The speak IPC caps one call at 4000 characters; long flushes are
+    // chunked so no sentence is ever dropped for being part of a big reply.
+    for (let offset = 0; offset < fresh.length; offset += 4000) {
+      void window.moki.speak(fresh.slice(offset, offset + 4000)).catch(() => {});
+    }
+  }, [speakReplies, messages.at(-1)?.text, messages.length, messages.at(-1)?.status]);
   function accept(result: Result) { setState((previous) => applyResult(previous, result)); }
   async function perform(request: Request): Promise<Result | undefined> {
     if (lock.current) return;
@@ -208,8 +253,37 @@ export function App() {
     try { await window.moki.removeCapture(current.id); setAttachment(undefined); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not remove the screenshot.'); }
   }
+  useEffect(() => {
+    if (capturing) stopDictation(); // the screenshot capture owns the moment
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturing]);
+  function stopDictation() {
+    dictationSession.current?.stop();
+    dictationSession.current = null;
+    setDictating(false);
+  }
+  function startDictation() {
+    if (!writable || runtimeFailed || dictating) return;
+    const base = editing ? '' : draft;
+    const session = dictation.start((event) => {
+      if (event.final && !event.transcript) return; // session ended cleanly
+      if (event.final) { stopDictation(); return; }
+      const spoken = event.transcript;
+      if (!spoken) return;
+      if (editing) setEditing((current) => current && { ...current, text: current.text + (current.text && !current.text.endsWith(' ') ? ' ' : '') + spoken });
+      else setDrafts((current) => ({ ...current, [draftKey]: (base ? base + ' ' : '') + spoken }));
+    }, (message) => {
+      stopDictation();
+      setError(message);
+    });
+    if (!session) { setError('Dictation is unavailable in this window.'); return; }
+    dictationSession.current = session;
+    setDictating(true);
+  }
   async function stop() {
+    stopDictation();
     if (!conversationId) return;
+    void window.moki.stopSpeaking().catch(() => {});
     try { accept(await window.moki.request({ method: 'cancelChat', conversationId })); }
     catch (e) { setError(String(e)); }
   }
@@ -223,6 +297,17 @@ export function App() {
     <header className="titlebar flex min-h-12 items-center justify-end gap-1 pr-2.5 pb-2">
       <span className="px-2 text-[12.5px] font-medium text-ink-2">Moki</span>
       {contextModel && <ContextRing estimate={contextEstimate} contextWindow={contextModel.contextWindow} modelName={contextModel.name} />}
+      <Button variant="ghost" size="icon-sm" aria-label={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'} title={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'} aria-pressed={speakReplies} disabled={runtimeFailed} onClick={() => {
+        const next = !speakReplies;
+        setSpeakReplies(next);
+        try { localStorage.setItem('moki:speak-replies', next ? 'on' : 'off'); } catch { /* storage unavailable */ }
+        if (!next) void window.moki.stopSpeaking().catch(() => {});
+      }}>
+        <span className={`relative inline-flex transition-opacity ${speakReplies ? '' : 'opacity-40'}`}>
+          <Speaker />
+          {speaking && <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden="true" />}
+        </span>
+      </Button>
       <Button variant="ghost" size="icon-sm" aria-label="New conversation" title="New conversation" disabled={busy || capturing || !assistant} onClick={() => void newChat()}><Plus /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="History" title="History" disabled={busy || capturing} onClick={() => void window.moki.openHistory().catch((e) => setError(String(e)))}><Clock /></Button>
       <Button variant="ghost" size="icon-sm" aria-label="Settings" title="Settings" disabled={busy || capturing} onClick={() => void window.moki.openSettings().catch((e) => setError(String(e)))}><Gear /></Button>
@@ -310,7 +395,24 @@ export function App() {
           className="block max-h-40 w-full resize-none bg-transparent px-3 pt-2 pb-1 text-[13.5px] leading-relaxed text-ink placeholder:text-ink-3 focus:outline-none disabled:opacity-50" />
         <div className="flex items-center justify-between gap-2 px-1 pb-0.5">
           <div className="flex min-w-0 items-center gap-0.5">
-            <Button variant="ghost" size="icon-sm" aria-label="Capture screen region" title="Capture screen region (⌘⇧8)" disabled={runtimeFailed || busy || capturing} onClick={() => void window.moki.startCapture().catch((cause) => setError(String(cause)))}><Capture /></Button>
+            <Button variant="ghost" size="icon-sm" aria-label="Capture screen region" title="Capture screen region (⌘⇧8)" disabled={runtimeFailed || busy || capturing || dictating} onClick={() => void window.moki.startCapture().catch((cause) => setError(String(cause)))}><Capture /></Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={dictating ? 'Stop dictation' : 'Dictate a message'}
+              title={dictating ? 'Stop dictation' : 'Hold to dictate; click to toggle'}
+              aria-pressed={dictating}
+              disabled={runtimeFailed || busy || capturing || !writable}
+              onPointerDown={(event) => { event.preventDefault(); startDictation(); }}
+              onPointerUp={() => { if (dictating) stopDictation(); }}
+              onPointerLeave={() => { if (dictating) stopDictation(); }}
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (dictating) stopDictation(); else startDictation(); } }}
+            >
+              <span className={`relative inline-flex transition-opacity ${dictating ? '' : 'opacity-70'}`}>
+                <Mic />
+                {dictating && <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden="true" />}
+              </span>
+            </Button>
             {conversationId && writable && <>
               <SimpleSelect
                 compact

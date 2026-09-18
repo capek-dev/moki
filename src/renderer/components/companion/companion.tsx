@@ -6,7 +6,7 @@ export const PALETTES = {
   mint: { light: '#edfae8', body: '#a8d5c1', shade: '#73aa9e', accent: '#437e79' },
   sky: { light: '#eaf6ff', body: '#a6c9e7', shade: '#759cce', accent: '#516fa5' },
 };
-export type Mood = 'idle' | 'thinking' | 'working' | 'attention' | 'done';
+export type Mood = 'idle' | 'thinking' | 'working' | 'attention' | 'done' | 'speaking';
 import type { Appearance } from '@shared/appearance';
 export { INITIAL_APPEARANCE, type Appearance } from '@shared/appearance';
 const BODIES = {
@@ -58,7 +58,7 @@ export function Companion({ appearance, mood = 'idle', paused = false }: { appea
         <g className="creature-eyes">
           {mood === 'done' ? <><path d="M87 121 Q94 110 101 121" /><path d="M139 121 Q146 110 153 121" /></> : appearance.face === 'sleepy' ? <><path d="M86 118 Q94 125 102 118" /><path d="M138 118 Q146 125 154 118" /></> : <><ellipse cx="94" cy="120" rx="5" ry="8" fill="#443544" stroke="none" /><ellipse cx="146" cy="120" rx="5" ry="8" fill="#443544" stroke="none" /><circle cx="95" cy="117" r="1.5" fill="white" stroke="none" /><circle cx="147" cy="117" r="1.5" fill="white" stroke="none" /></>}
         </g>
-        {mood === 'attention' ? <ellipse cx="120" cy="143" rx="4" ry="5" strokeWidth="3" /> : mood === 'thinking' ? <path d="M115 143 L123 143" strokeWidth="3" /> : <path d="M111 141 Q120 151 129 141" strokeWidth="3" />}
+        {mood === 'attention' ? <ellipse cx="120" cy="143" rx="4" ry="5" strokeWidth="3" /> : mood === 'speaking' ? <ellipse cx="120" cy="144" rx="5" ry="6" strokeWidth="3" /> : mood === 'thinking' ? <path d="M115 143 L123 143" strokeWidth="3" /> : <path d="M111 141 Q120 151 129 141" strokeWidth="3" />}
       </g>
       {appearance.accessory === 'glasses' && <g fill="none" stroke={p.accent} strokeWidth="3"><rect x="77" y="107" width="34" height="28" rx="11" /><rect x="129" y="107" width="34" height="28" rx="11" /><path d="M111 118 Q120 113 129 118 M77 116 L65 112 M163 116 L175 112" /></g>}
       {appearance.accessory === 'scarf' && <g fill={p.accent}><path d="M64 164 Q120 186 176 164 L172 177 Q120 198 68 177Z" /><path d="M146 178 L167 175 L174 205 Q162 211 151 203Z" /><path d="M156 190 L169 187" stroke={p.light} strokeWidth="3" /></g>}

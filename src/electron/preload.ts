@@ -9,6 +9,13 @@ const api: DesktopAPI = {
   },
   providers: (command) => ipcRenderer.invoke('moki:providers', command),
   mcpAuth: (command) => ipcRenderer.invoke('moki:auth', command),
+  speak: (text) => ipcRenderer.invoke('moki:speak', text),
+  stopSpeaking: () => ipcRenderer.invoke('moki:stop-speaking'),
+  onSpeech: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
+    ipcRenderer.on('moki:speech', handler);
+    return () => ipcRenderer.removeListener('moki:speech', handler);
+  },
   onProviders: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
     ipcRenderer.on('moki:providers-state', handler);

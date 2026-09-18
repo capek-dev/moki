@@ -59,6 +59,14 @@ export function Undo(props: SVGProps<SVGSVGElement>) {
   return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...stroke} {...props}><path d="M3.5 6.5h6a3 3 0 1 1 0 6H6" /><path d="M5.5 4 3 6.5 5.5 9" /></svg>;
 }
 
+export function Speaker(props: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" {...stroke} {...props}><path d="M8 2.5 5 5H3.5A1.5 1.5 0 0 0 2 6.5v3A1.5 1.5 0 0 0 3.5 11H5l3 2.5Z" /><path d="M10.8 5.7a3.2 3.2 0 0 1 0 4.6M12.7 3.9a5.8 5.8 0 0 1 0 8.2" /></svg>;
+}
+
+export function Mic(props: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" {...stroke} {...props}><rect x="6" y="2" width="4" height="7" rx="2" /><path d="M4.5 7.5a3.5 3.5 0 0 0 7 0M8 11v2.5" /></svg>;
+}
+
 export function Pencil(props: SVGProps<SVGSVGElement>) {
   return <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" {...stroke} {...props}><path d="M11.2 2.7a1.7 1.7 0 0 1 2.4 2.4L6 12.7l-3.2.8.8-3.2Z" /></svg>;
 }

@@ -40,6 +40,9 @@ export interface CuaState { enabled: boolean; connected: boolean; version: strin
 export interface McpTool { name: string; description: string }
 export interface McpServerState { name: string; transport: 'stdio' | 'http'; enabled: boolean; connected: boolean; tools: McpTool[]; disabledTools: string[]; error: string | null; needsAuth: boolean; signedIn: boolean; stale: boolean; weight: number }
 export interface McpState { servers: McpServerState[]; diagnostics: string[] }
+// Spoken replies (plan 17 A): main synthesizes and pushes the speaking state;
+// the renderer only submits text and reacts to events. No polling.
+export interface SpeechState { speaking: boolean }
 // Sign-in for web connections runs entirely in Electron main (browser OAuth,
 // encrypted vault); the renderer only starts it and observes the outcome.
 export type McpAuthCommand = { action: 'signIn'; server: string } | { action: 'signOut'; server: string };
@@ -53,6 +56,9 @@ export interface DesktopAPI {
   onRuntimeError(listener: (message: string) => void): () => void;
   providers(command: ProviderCommand): Promise<ProviderState>;
   mcpAuth(command: McpAuthCommand): Promise<McpAuthResult>;
+  speak(text: string): Promise<void>;
+  stopSpeaking(): Promise<void>;
+  onSpeech(listener: (state: SpeechState) => void): () => void;
   onProviders(listener: (state: ProviderState) => void): () => void;
   request(request: Request): Promise<Result>;
   openSettings(): Promise<void>;

@@ -3,6 +3,7 @@ import { requireCopyText, requireWebLink } from '@shared/answer-actions';
 import { attachmentDirectories, requireAttachmentId } from '@shared/attachments';
 import { ScreenshotCapture } from '@electron/screenshot-capture';
 import { EncryptedVault, ProviderConnections } from '@electron/provider-connections';
+import { SpeechSynth } from '@electron/speech';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { parseMcpConfig } from '@shared/mcp';
@@ -38,6 +39,7 @@ let runtime: Runtime | undefined;
 let providers: ProviderConnections | undefined;
 let mcpAuth: import('@electron/mcp-connections').McpConnections | undefined;
 let capture: ScreenshotCapture | undefined;
+let speech: SpeechSynth | undefined;
 let quitting = false;
 let shutdownComplete = false;
 // macOS gets real window glass (vibrancy behind translucent panels); other
@@ -161,6 +163,11 @@ else {
     });
     secureWindow(window);
     capture = new ScreenshotCapture(app.getPath('userData'), () => window);
+    // Speaking state is pushed, never polled: the synth emits, main forwards.
+    speech = new SpeechSynth();
+    speech.onChange((speaking) => {
+      for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:speech', { speaking });
+    });
     providers = new ProviderConnections(new EncryptedVault(join(app.getPath('userData'), 'providers.encrypted'), safeStorage), (url) => shell.openExternal(url), (state) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:providers-state', state);
     });
@@ -179,6 +186,15 @@ else {
       const result = await mcpAuth.handle(url ? { action: 'signIn', server: input.server, url } : { action: 'signOut', server: input.server });
       await runtime!.push({ event: 'mcp-auth', server: input.server, headers: mcpAuth.headers(input.server) });
       return result;
+    });
+    ipcMain.handle('moki:speak', (event, text: unknown) => {
+      assertTrusted(event);
+      if (typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('Invalid speech text.');
+      speech!.speakText(text);
+    });
+    ipcMain.handle('moki:stop-speaking', (event) => {
+      assertTrusted(event);
+      speech!.stop();
     });
     ipcMain.handle('moki:settings', (event) => { assertTrusted(event); return openSettings(); });
     ipcMain.handle('moki:history', (event) => { assertTrusted(event); return openHistory(); });
@@ -269,6 +285,7 @@ else {
     capture?.close();
     providers?.close();
     mcpAuth?.close();
+    speech?.close();
     void (runtime?.close() ?? Promise.resolve()).finally(() => { shutdownComplete = true; app.quit(); });
   });
 }

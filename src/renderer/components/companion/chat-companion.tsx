@@ -7,10 +7,13 @@ interface Activity {
   messages: readonly Message[];
   starting: boolean;
   failed: boolean;
+  /** The main-process synthesizer is currently talking (plan 17 A). */
+  speaking?: boolean;
 }
 
-export function chatMood({ messages, starting, failed }: Activity): Mood {
+export function chatMood({ messages, starting, failed, speaking }: Activity): Mood {
   if (failed) return 'attention';
+  if (speaking) return 'speaking';
   const streaming = messages.find((message) => message.role === 'assistant' && message.status === 'streaming');
   if (streaming) return streaming.text ? 'working' : 'thinking';
   if (starting) return 'thinking';

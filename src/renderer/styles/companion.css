@@ -18,6 +18,7 @@
 .companion[data-mood='working'] .creature-arm { transform-origin: 48px 137px; animation: creature-tap .9s ease-in-out infinite alternate; }
 .companion[data-mood='attention'] .creature-wave { transform-origin: 184px 151px; animation: creature-wave 1s ease-in-out 3; }
 .companion[data-mood='done'] .creature-body { animation: creature-hop .7s ease-in-out 1; }
+.companion[data-mood='speaking'] .creature-body { animation: creature-focus 2.4s ease-in-out infinite; }
 .companion[data-motion='expressive'] { --lift: -9px; --tilt: 7deg; }
 .companion[data-motion='subtle'] { --lift: -3px; --tilt: 3deg; }
 .companion[data-motion='still'] *, .companion[data-paused='true'] * { animation: none !important; }
