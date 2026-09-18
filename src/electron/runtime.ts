@@ -52,8 +52,8 @@ export class Runtime {
     // uses console.error so the stdout JSON-line protocol stays clean.
     createInterface({ input: this.child.stderr }).on('line', (line) => { if (line.trim()) process.stderr.write(line + '\n'); });
   }
-  startChat(request: ChatRequest, credentials: Credentials): Promise<Result> {
-    return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials });
+  startChat(request: ChatRequest, credentials: Credentials, toolLoading?: import('@shared/tool-loading').ToolLoadingConfig): Promise<Result> {
+    return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials, toolLoading });
   }
   request(request: Request): Promise<Result> { return this.send(request); }
   // Fire-and-forget event push to the backend (no id, no response expected).

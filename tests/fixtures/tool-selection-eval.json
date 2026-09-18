@@ -1,0 +1,25 @@
+{
+  "provenance": "Synthetic mixed-connection fixture, not an export of installed connections. Cua names match scripts/cua-tools.json; filesystem, Pipedrive and mail names are illustrative. Replace with actual canonical names before live evaluation.",
+  "tools": [
+    { "name": "list_apps", "description": "List running and installed macOS applications.", "inputSchema": { "type": "object" } },
+    { "name": "list_windows", "description": "List application windows.", "inputSchema": { "type": "object" } },
+    { "name": "filesystem__read_file", "description": "Read the text contents of a file at a known path.", "inputSchema": { "type": "object" } },
+    { "name": "filesystem__list_directory", "description": "List files in a directory.", "inputSchema": { "type": "object" } },
+    { "name": "filesystem__write_file", "description": "Create or overwrite a file.", "inputSchema": { "type": "object" } },
+    { "name": "pipedrive__search_deals", "description": "Find CRM deals by customer or title.", "inputSchema": { "type": "object" } },
+    { "name": "pipedrive__update_deal", "description": "Change a CRM deal's details or status.", "inputSchema": { "type": "object" } },
+    { "name": "pipedrive__get_items", "description": "List activities scheduled for CRM deals.", "inputSchema": { "type": "object" } },
+    { "name": "mail__create_draft", "description": "Save an email draft without sending it.", "inputSchema": { "type": "object" } },
+    { "name": "mail__send", "description": "Send an email immediately.", "inputSchema": { "type": "object" } }
+  ],
+  "cases": [
+    { "id": "running-apps", "prompt": "List all running apps.", "relevant": ["list_apps"], "required": [["list_apps"]] },
+    { "id": "draft-in-chat", "prompt": "Let's draft an email thanking Alex for the meeting. Write it here, don't open an app or send anything.", "relevant": [], "required": [] },
+    { "id": "save-draft", "prompt": "Save a draft in my connected email account thanking Alex for the meeting. Do not send it.", "relevant": ["mail__create_draft"], "required": [["mail__create_draft"]] },
+    { "id": "read-known-file", "prompt": "Read /Documents/X.md.", "relevant": ["filesystem__read_file"], "required": [["filesystem__read_file"]] },
+    { "id": "crm-search", "prompt": "Find Acme's deals in Pipedrive.", "relevant": ["pipedrive__search_deals"], "required": [["pipedrive__search_deals"]] },
+    { "id": "ambiguous-name", "prompt": "List the activities scheduled for my CRM deals.", "relevant": ["pipedrive__get_items"], "required": [["pipedrive__get_items"]] },
+    { "id": "multi-step", "prompt": "Read /Documents/X.md and use it to save an email draft in my connected account. Don't send it.", "relevant": ["filesystem__read_file", "mail__create_draft"], "required": [["filesystem__read_file"], ["mail__create_draft"]] },
+    { "id": "follow-up", "prompt": "Read that file now.", "recent": "user: The file I mean is /Documents/X.md.", "relevant": ["filesystem__read_file"], "required": [["filesystem__read_file"]] }
+  ]
+}

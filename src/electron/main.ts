@@ -4,6 +4,7 @@ import { attachmentDirectories, requireAttachmentId } from '@shared/attachments'
 import { ScreenshotCapture } from '@electron/screenshot-capture';
 import { EncryptedVault, ProviderConnections } from '@electron/provider-connections';
 import { SpeechSynth } from '@electron/speech';
+import { ToolLoadingSettings } from '@electron/tool-loading';
 import { DictationService } from '@electron/dictation-service';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -177,6 +178,14 @@ else {
     providers = new ProviderConnections(new EncryptedVault(join(app.getPath('userData'), 'providers.encrypted'), safeStorage), (url) => shell.openExternal(url), (state) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:providers-state', state);
     });
+    const toolLoading = new ToolLoadingSettings(join(app.getPath('userData'), 'tool-loading.encrypted'), safeStorage);
+    ipcMain.handle('moki:tool-loading', (event, command: unknown) => {
+      assertTrusted(event);
+      if (event.sender !== settings?.webContents) throw new Error('Smart-loading settings are only available in Settings.');
+      const state = toolLoading.handle(command);
+      for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:tool-loading-state', state);
+      return state;
+    });
     ipcMain.handle('moki:providers', (event, command: unknown) => {
       assertTrusted(event);
       if (event.sender !== settings?.webContents) throw new Error('Provider settings are only available in Settings.');
@@ -261,7 +270,7 @@ else {
         if (result.snapshot.messages.some((m) => m.conversationId === id && m.status === 'streaming')) throw new Error('This conversation is already replying.');
         const credentials = await providers!.credentials(assistant.provider);
         if (quitting || pendingChats.get(id) !== pending) throw new Error('Message cancelled.');
-        return broadcast(await runtime!.startChat({ conversationId: id, text: input.text, model: input.model, thinking, attachmentIds: input.attachmentIds, editOf: input.editOf }, credentials));
+        return broadcast(await runtime!.startChat({ conversationId: id, text: input.text, model: input.model, thinking, attachmentIds: input.attachmentIds, editOf: input.editOf }, credentials, toolLoading.config()));
       } finally { if (pendingChats.get(id) === pending) pendingChats.delete(id); }
     });
     window.on('close', (event) => { if (!quitting) { event.preventDefault(); window?.hide(); } });

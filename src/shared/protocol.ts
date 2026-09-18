@@ -56,6 +56,8 @@ export interface McpAuthResult { signedIn: boolean; note?: string }
 export interface ToolCallRecord { name: string; label: string; detail: string; summary: string | null; status: 'running' | 'ok' | 'failed'; at: number }
 export interface ChatRequest { conversationId: string; text: string; model: string; thinking?: Thinking | null; attachmentIds?: string[]; editOf?: string }
 export interface DesktopAPI {
+  toolLoading(command: import('./tool-loading').ToolLoadingCommand): Promise<import('./tool-loading').ToolLoadingState>;
+  onToolLoading(listener: (state: import('./tool-loading').ToolLoadingState) => void): () => void;
   chat(request: ChatRequest): Promise<Result>;
   onRuntimeError(listener: (message: string) => void): () => void;
   providers(command: ProviderCommand): Promise<ProviderState>;

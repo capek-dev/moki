@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopAPI } from '@shared/protocol';
 const api: DesktopAPI = {
+  toolLoading: (command) => ipcRenderer.invoke('moki:tool-loading', command),
+  onToolLoading: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
+    ipcRenderer.on('moki:tool-loading-state', handler);
+    return () => ipcRenderer.removeListener('moki:tool-loading-state', handler);
+  },
   chat: (request) => ipcRenderer.invoke('moki:chat', request),
   onRuntimeError: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, message: string) => listener(message);

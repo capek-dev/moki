@@ -21,6 +21,11 @@ test('preload strips Electron events and removes subscriptions', () => {
   expect(received).toEqual([[result]]);
   unsubscribe();
   expect(ipc.listenerCount('moki:state')).toBe(0);
+  const loading: unknown[] = [];
+  const stop = api.onToolLoading((...args: unknown[]) => loading.push(args));
+  ipc.emit('moki:tool-loading-state', { privileged: true }, { enabled: true, maxDirect: 12, configured: true });
+  expect(loading).toEqual([[{ enabled: true, maxDirect: 12, configured: true }]]);
+  stop(); expect(ipc.listenerCount('moki:tool-loading-state')).toBe(0);
 });
 
 // Execute the actual bundle with a private Electron/process harness. No global
@@ -106,6 +111,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(menu.some((item) => item.label === 'Developer')).toBe(development);
     expect(windows[0].webContents.devTools).toBe(development ? 1 : 0);
     expect(() => handlers.get('moki:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
+    expect(() => handlers.get('moki:tool-loading')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
     await expect(request(event(windows[0]), { method: 'cuaTools' })).rejects.toThrow('only available in Settings');
     await expect(handlers.get('moki:auth')!(event(windows[0]), { action: 'signIn', server: 'webby' })).rejects.toThrow('only available in Settings');
     await expect(request(event(windows[0]), { method: 'cuaSetTool', tool: 'click', disabled: true })).rejects.toThrow('only available in Settings');
@@ -117,6 +123,8 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(windows[1].focused).toBe(1);
     expect(windows[1].webContents.mainFrame.url).toEndWith('#settings');
     expect(windows[1].options.webPreferences.sandbox).toBe(true);
+    expect(handlers.get('moki:tool-loading')!(event(windows[1]), { action: 'status' })).toEqual({ enabled: false, maxDirect: 12, configured: false });
+    expect(windows[0].webContents.sent.at(-1).channel).toBe('moki:tool-loading-state');
     await handlers.get('moki:history')!(event(windows[0]));
     expect(windows).toHaveLength(3);
     for (const w of windows) {

@@ -1,4 +1,6 @@
 import type { ModelMessage } from 'ai';
+import { requireToolLoading, type ToolLoadingConfig } from '@shared/tool-loading';
+import type { SelectionEvidence } from './tool-scoring';
 import { Store, text } from '@backend/store';
 import { requireThinking, type Thinking } from '@shared/models';
 import type { Attachment, Provider, Result, Message, ToolCallRecord } from '@shared/protocol';
@@ -54,11 +56,12 @@ function summarizeToolText(value: string): string {
 }
 export class Chat {
   private active = new Map<string, { abort: AbortController; finish: () => void }>();
-  constructor(private store: Store, private generate: Generate, private publish: (result: Result) => void, private toolSource?: (signal: AbortSignal) => Promise<Toolbag>) {}
-  start(input: { conversationId: string; text: string; model: string; thinking?: Thinking | null; attachmentIds?: unknown[]; editOf?: string; credentials: Credentials }): Result {
+  constructor(private store: Store, private generate: Generate, private publish: (result: Result) => void, private toolSource?: (signal: AbortSignal, evidence: SelectionEvidence, config?: ToolLoadingConfig) => Promise<Toolbag>) {}
+  start(input: { conversationId: string; text: string; model: string; thinking?: Thinking | null; attachmentIds?: unknown[]; editOf?: string; credentials: Credentials; toolLoading?: ToolLoadingConfig }): Result {
     const id = text(input.conversationId, 100);
     if (input.editOf !== undefined && typeof input.editOf !== 'string') throw new Error('Invalid edit target.');
     const body = text(input.text, 16000);
+    const toolLoading = input.toolLoading === undefined ? undefined : requireToolLoading(input.toolLoading);
     const attachmentIds = input.attachmentIds === undefined ? [] : input.attachmentIds;
     if (!Array.isArray(attachmentIds) || attachmentIds.length > 1) throw new Error('Invalid attachments.');
     for (const attachmentId of attachmentIds) requireAttachmentId(attachmentId);
@@ -69,6 +72,8 @@ export class Chat {
     else { text(input.credentials.access, 32000); text(input.credentials.accountId, 32000); }
     if (this.active.has(id)) throw new Error('This conversation is already replying.');
     const { messageId } = this.store.begin(id, body, input.model, thinking, attachmentIds, input.editOf);
+    const visible = this.store.messages(id).filter(message => message.id !== messageId && (message.role === 'user' || message.status === 'complete'));
+    const evidence = { request: body.slice(0, 8000), recent: visible.slice(0, -1).slice(-4).map(message => `${message.role}: ${message.text.slice(-1000)}`).join('\n').slice(-2000) };
     const abort = new AbortController();
     let bag: Toolbag | undefined;
     const toolCalls: ToolCallRecord[] = [];
@@ -100,7 +105,7 @@ export class Chat {
     // finish() always closes.
     queueMicrotask(() => { void (async () => {
       try {
-        if (this.toolSource) { try { bag = await this.toolSource(abort.signal); } catch (error) {
+        if (this.toolSource) { try { bag = await this.toolSource(abort.signal, evidence, toolLoading); } catch (error) {
           // Plan 18: an over-budget toolset fails the turn with guidance — it
           // must never degrade to a silent toolless reply.
           if (error instanceof ToolBudgetError) {
@@ -109,6 +114,7 @@ export class Chat {
             return;
           }
           console.error(`[moki] tool source unavailable, continuing without tools: ${describeError(error)}`); bag = undefined; } }
+        if (finished || abort.signal.aborted) { bag?.close(); bag = undefined; return; }
         if (bag?.tools.length) armDeadline(600000);
         const tools = bag?.tools.map((definition) => ({
           ...definition,

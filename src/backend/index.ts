@@ -4,8 +4,9 @@ import { createInterface } from 'node:readline';
 import { Store } from '@backend/store';
 import { Chat } from '@backend/chat';
 import { Cua, mcpTransport, type Toolbag } from '@backend/cua';
-import { Mcp, mergeToolbags } from '@backend/mcp';
+import { Mcp } from '@backend/mcp';
 import { generate } from '@backend/model-stream';
+import { smartToolbag } from './tool-scoring';
 import type { Result } from '@shared/protocol';
 // Import the published composition entry point in the compiled runtime proof.
 import * as capek from '@capekai/core/composition';
@@ -16,7 +17,7 @@ mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 const store = new Store(databasePath(dataDir), dataDir);
 let revision = 0;
 const stamp = (result: Result) => ({ ...result, revision: ++revision });
-const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ event: 'state', result: stamp(result) })), async (signal) => {
+const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ event: 'state', result: stamp(result) })), async (signal, evidence, config) => {
   // Each source degrades independently: one broken connection never removes
   // the other's tools from the turn.
   const bags: Toolbag[] = [];
@@ -24,7 +25,10 @@ const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ 
     try { bags.push(await load()); }
     catch (error) { console.error(`[moki] tool source unavailable, continuing without it: ${error instanceof Error ? error.message : String(error)}`); }
   }
-  return mergeToolbags(bags);
+  try {
+    signal.throwIfAborted();
+    return await smartToolbag(bags, evidence, config ?? { enabled: false, maxDirect: 12 }, signal, { formulation: 'direct-name', descriptorMode: 'name-only' });
+  } catch (error) { for (const bag of bags) bag.close(); throw error; }
 });
 const cua = new Cua(store, mcpTransport());
 const mcp = new Mcp(dataDir, store);

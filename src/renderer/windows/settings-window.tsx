@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Assistant, Result, Snapshot } from '@shared/protocol';
 import { ProviderSettings } from '@renderer/components/settings/provider-settings';
+import { ToolLoadingSettings } from '@renderer/components/settings/tool-loading-settings';
 import { ConnectionsSettings } from '@renderer/components/settings/connections-settings';
 import { AppearancePreview } from '@renderer/components/settings/appearance-preview';
 import { INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
@@ -89,7 +90,7 @@ export function Settings() {
         </div>
         <TonePicker choice={choice} onChoose={choose} />
       </Panel>}
-      <div hidden={section !== 'Providers'}><ProviderSettings /></div>
+      <div hidden={section !== 'Providers'}><ProviderSettings /><ToolLoadingSettings /></div>
       {section === 'Integrations' && <div className="grid gap-3">
         <Panel className="grid gap-1.5">
           <h2 className="text-[15px] font-semibold">Integrations</h2>
