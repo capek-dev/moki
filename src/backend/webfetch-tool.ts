@@ -38,10 +38,12 @@ const FORMATS = new Set(['markdown', 'text', 'html']);
 
 type WebfetchFormat = 'markdown' | 'text' | 'html';
 type ResolveHost = (hostname: string) => Promise<readonly string[]>;
+type RequestAddress = (url: URL, address: string, signal: AbortSignal) => Promise<Response>;
 
 export interface WebfetchDependencies {
   fetcher?: typeof fetch;
   resolveHost?: ResolveHost;
+  requestAddress?: RequestAddress;
 }
 
 class WebfetchValidationError extends Error {
@@ -112,7 +114,7 @@ async function defaultResolveHost(hostname: string): Promise<readonly string[]> 
   return records.map((record) => record.address);
 }
 
-async function publicAddress(url: URL, resolveHost: ResolveHost, signal: AbortSignal): Promise<string> {
+async function publicAddresses(url: URL, resolveHost: ResolveHost, signal: AbortSignal): Promise<readonly string[]> {
   const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || BLOCKED_HOSTS.has(hostname)) {
     throw new WebfetchValidationError(`Blocked non-public host: ${hostname || '(empty)'}.`);
@@ -130,10 +132,10 @@ async function publicAddress(url: URL, resolveHost: ResolveHost, signal: AbortSi
     throw new WebfetchValidationError(`Could not resolve host: ${hostname}.`);
   }
   if (!addresses.length || addresses.some(blockedIp)) throw new WebfetchValidationError(`Blocked non-public host: ${hostname}.`);
-  return addresses[0];
+  return [...new Set(addresses)].sort((left, right) => Number(isIP(right) === 4) - Number(isIP(left) === 4));
 }
 
-function pinnedFetch(url: URL, address: string, signal: AbortSignal): Promise<Response> {
+function requestAddress(url: URL, address: string, signal: AbortSignal): Promise<Response> {
   return new Promise((resolve, reject) => {
     const hostname = url.hostname.replace(/^\[|\]$/g, '');
     const requester = url.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -166,6 +168,25 @@ function pinnedFetch(url: URL, address: string, signal: AbortSignal): Promise<Re
     request.on('error', reject);
     request.end();
   });
+}
+
+async function pinnedFetch(
+  url: URL,
+  addresses: readonly string[],
+  signal: AbortSignal,
+  request: RequestAddress = requestAddress,
+): Promise<Response> {
+  let lastError: unknown;
+  for (const address of addresses) {
+    signal.throwIfAborted();
+    try {
+      return await request(url, address, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = error;
+    }
+  }
+  throw new Error(`Could not connect to ${url.hostname}.`, { cause: lastError });
 }
 
 async function readBounded(response: Response): Promise<string> {
@@ -226,6 +247,18 @@ function resultText(url: URL, title: string, contentType: string, content: strin
   return [`Title: ${title}`, `URL: ${url.toString()}`, `Content-Type: ${contentType || 'unknown'}`, '', body].join('\n');
 }
 
+function errorDetail(error: unknown, depth = 0): string {
+  if (!(error instanceof Error)) return String(error);
+  const code = (error as NodeJS.ErrnoException).code;
+  const own = [code, error.message].filter(Boolean).join(': ');
+  const cause = (error as { cause?: unknown }).cause;
+  return depth < 2 && cause !== undefined ? `${own}; ${errorDetail(cause, depth + 1)}` : own;
+}
+
+function safeErrorDetail(error: unknown): string {
+  return errorDetail(error).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown network error';
+}
+
 export async function executeWebfetch(
   rawInput: unknown,
   signal: AbortSignal,
@@ -242,11 +275,11 @@ export async function executeWebfetch(
 
     for (let redirects = 0; ; redirects++) {
       requestSignal.throwIfAborted();
-      const address = await publicAddress(current, resolveHost, requestSignal);
+      const addresses = await publicAddresses(current, resolveHost, requestSignal);
       requestSignal.throwIfAborted();
       const response = fetcher
         ? await fetcher(current, { method: 'GET', redirect: 'manual', signal: requestSignal })
-        : await pinnedFetch(current, address, requestSignal);
+        : await pinnedFetch(current, addresses, requestSignal, dependencies.requestAddress);
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location')?.trim();
         if (!location) throw new WebfetchValidationError(`Redirect ${response.status} did not include a location.`);
@@ -269,7 +302,8 @@ export async function executeWebfetch(
       ? 'Request timed out.'
       : error instanceof WebfetchValidationError
         ? error.message
-        : 'Web fetch failed.';
+        : `Network request failed: ${safeErrorDetail(error)}`;
+    console.error(`[moki] webfetch failed: ${safeErrorDetail(error)}`);
     return { text: message, isError: true };
   }
 }

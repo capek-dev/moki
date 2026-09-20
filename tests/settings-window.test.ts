@@ -7,6 +7,7 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import * as readline from 'node:readline';
 import * as nodeCrypto from 'node:crypto';
+import * as os from 'node:os';
 import { Store } from '@backend/store';
 
 test('preload strips Electron events and removes subscriptions', () => {
@@ -86,7 +87,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
       dialog: { showErrorBox: (_title: string, message: string) => { throw new Error(message); } },
     },
     'node:path': path, 'node:url': url, 'node:readline': readline,
-    'node:crypto': nodeCrypto, 'node:fs': {
+    'node:crypto': nodeCrypto, 'node:os': os, 'node:fs': {
       statSync() { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
       readFileSync() { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); },
       readdirSync: () => [] as string[],

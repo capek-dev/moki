@@ -251,7 +251,7 @@ export function ConnectionsSettings() {
           </div>
         </Field>
         {kind === 'stdio'
-          ? <Field label="Command" htmlFor="mcp-add-command" hint="The program Moki starts, with its settings. Separate with spaces.">
+          ? <Field label="Command" htmlFor="mcp-add-command" hint="Runs with your Mac login PATH. Quotes and ~/ paths are supported.">
               <Input id="mcp-add-command" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents" />
             </Field>
           : <Field label="Web address" htmlFor="mcp-add-url" hint="The address the app gives you for connecting its tools.">

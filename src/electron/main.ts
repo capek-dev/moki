@@ -15,6 +15,7 @@ import { LearningReviewCache } from '@electron/learning-review-cache';
 import { requireThinking } from '@shared/models';
 import type { ChatRequest, Request, Result } from '@shared/protocol';
 import { userDataPath } from '@shared/data-paths';
+import { localCommandEnvironment } from '@electron/local-command-environment';
 
 import { DEV_ORIGIN, isDevelopment } from '@shared/development';
 
@@ -172,6 +173,7 @@ else {
     const dictationHelper = app.isPackaged
       ? join(process.resourcesPath, 'native/moki-dictate')
       : join(appRoot, 'dist/native/moki-dictate');
+    const commandEnvironment = await localCommandEnvironment();
     runtime = new Runtime(binary, app.getPath('userData'), broadcast, (message) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:runtime-error', message);
     }, (due) => {
@@ -191,7 +193,7 @@ else {
           reviewCache.finish(due.runId);
         }
       })();
-    });
+    }, commandEnvironment);
     await runtime.ready;
     // Sign-ins from previous sessions keep working: push their headers into
     // the backend before anything fetches a catalog.

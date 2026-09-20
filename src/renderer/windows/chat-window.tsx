@@ -22,7 +22,7 @@ const AUTO_THINKING = 'auto';
 
 // Quiet tool trail: one friendly "doing now" line while a tool runs, a
 // collapsed summary afterwards. No sprawling per-call cards.
-function ToolTrail({ message }: { message: Message }) {
+export function ToolTrail({ message }: { message: Message }) {
   const calls = message.toolCalls ?? [];
   if (!calls.length) return null;
   const latest = calls.at(-1)!;
@@ -38,9 +38,12 @@ function ToolTrail({ message }: { message: Message }) {
       Used {calls.length} tool{calls.length === 1 ? '' : 's'}
     </summary>
     <ul className="mt-1 grid gap-0.5 border-l border-line pl-2.5">
-      {calls.map((call, index) => <li key={index} className="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-snug text-ink-3">
-        <span className={`h-1.5 w-1.5 shrink-0 translate-y-[-1px] self-center rounded-full ${call.status === 'failed' ? 'bg-danger' : call.status === 'running' ? 'bg-ink-3/60' : 'bg-ok'}`} aria-hidden="true" />
-        <span className="min-w-0 truncate">{call.label}{call.detail ? <span className="text-ink-3/70"> · {call.detail}</span> : null}</span>
+      {calls.map((call, index) => <li key={index} className="flex min-w-0 items-start gap-1.5 text-[11px] leading-snug text-ink-3">
+        <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${call.status === 'failed' ? 'bg-danger' : call.status === 'running' ? 'bg-ink-3/60' : 'bg-ok'}`} aria-hidden="true" />
+        <span className="min-w-0">
+          <span className="block truncate">{call.label}{call.detail ? <span className="text-ink-3/70"> · {call.detail}</span> : null}</span>
+          {call.status === 'failed' && call.summary ? <span className="block truncate text-danger/80" title={call.summary}>{call.summary}</span> : null}
+        </span>
       </li>)}
     </ul>
   </details>;

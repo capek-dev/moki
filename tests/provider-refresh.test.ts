@@ -4,7 +4,7 @@ function fixture() {
   let saved: ReturnType<Vault['read']> = { version: 1, codex: { access: 'expired', refresh: 'refresh', accountId: 'account', expires: 0 } };
   let resolve!: (response: Response) => void;
   let calls = 0;
-  const service = new ProviderConnections({ read: () => saved, write: (value) => { saved = value; } }, async () => {}, () => {}, (async (_url: string, init: RequestInit) => {
+  const service = new ProviderConnections({ read: () => saved, write: (value) => { saved = value; }, resetUnreadable: () => { saved = { version: 1 }; } }, async () => {}, () => {}, (async (_url: string, init: RequestInit) => {
     calls++;
     expect(new URLSearchParams(String(init.body)).get('grant_type')).toBe('refresh_token');
     return new Promise<Response>((r) => { resolve = r; });

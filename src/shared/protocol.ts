@@ -80,7 +80,7 @@ export interface Result {
   learningRun?: LearningRunSummary;
 }
 export type ProviderCommand =
-  | { action: 'status' | 'startCodex' | 'cancelCodex' }
+  | { action: 'status' | 'startCodex' | 'cancelCodex' | 'resetUnreadable' }
   | { action: 'saveDeepseek'; key: string }
   | { action: 'completeCodex'; url: string }
   | { action: 'disconnect'; provider: Provider };

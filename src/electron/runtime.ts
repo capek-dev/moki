@@ -9,11 +9,11 @@ export class Runtime {
   private stopped = false;
   private closing?: Promise<void>;
   readonly ready: Promise<void>;
-  constructor(executable: string, dataDir: string, private changed: (result: Result) => void = () => {}, private failed: (message: string) => void = () => {}, private learningDue: (due: { runId: string; provider: 'deepseek' | 'codex'; model: string }) => void = () => {}) {
+  constructor(executable: string, dataDir: string, private changed: (result: Result) => void = () => {}, private failed: (message: string) => void = () => {}, private learningDue: (due: { runId: string; provider: 'deepseek' | 'codex'; model: string }) => void = () => {}, environment: NodeJS.ProcessEnv = process.env) {
     this.child = spawn(executable, [], {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, MOKI_DATA_DIR: dataDir },
+      env: { ...environment, MOKI_DATA_DIR: dataDir },
     });
     this.ready = new Promise((resolve, reject) => {
       const timer = setTimeout(() => { reject(new Error('Runtime startup timed out.')); this.child.kill(); }, 15000);

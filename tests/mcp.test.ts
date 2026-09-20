@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FAKE_SERVER_SOURCE, Mcp, mergeToolbags } from '@backend/mcp';
+import { expandLocalHome, FAKE_SERVER_SOURCE, Mcp, mergeToolbags, parseLocalCommand } from '@backend/mcp';
 import type { Toolbag } from '@backend/cua';
 import { Store } from '@backend/store';
 import { describeMcpCall, mcpToolLabel } from '@shared/mcp';
@@ -89,6 +89,28 @@ test('missing file is an empty config, malformed JSON is a diagnostic', async ()
     const state = await mcp.tools();
     expect(state.servers).toEqual([]);
     expect(state.diagnostics[0]).toContain('not valid JSON');
+  } finally { cleanup(); }
+});
+
+test('local command parsing supports quotes without enabling a shell', () => {
+  expect(parseLocalCommand(`npx -y package "${'/Users/test/My Documents'}" 'literal value'`)).toEqual([
+    'npx', '-y', 'package', '/Users/test/My Documents', 'literal value',
+  ]);
+  expect(parseLocalCommand('bunx package path\\ with\\ spaces')).toEqual(['bunx', 'package', 'path with spaces']);
+  expect(() => parseLocalCommand('npx "unfinished')).toThrow('unfinished quote');
+  expect(expandLocalHome('~/moki_docs', '/Users/test')).toBe('/Users/test/moki_docs');
+  expect(expandLocalHome('~other/docs', '/Users/test')).toBe('~other/docs');
+});
+
+test('catalog fetch resolves a package-manager-style command through the supplied PATH', async () => {
+  const { dir, cleanup } = freshDir();
+  try {
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    symlinkSync(process.execPath, join(bin, 'package-runner'));
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ servers: { notes: { transport: 'stdio', command: 'package-runner', args: ['-e', FAKE_SERVER_SOURCE] } } }));
+    const state = await new Mcp(dir, undefined, { ...process.env, PATH: bin, HOME: dir }).tools();
+    expect(state.servers[0]).toMatchObject({ connected: true, error: null });
   } finally { cleanup(); }
 });
 
@@ -396,9 +418,9 @@ test('addServer writes the config, rejects bad input, and removeServer deletes',
   const { dir, cleanup } = freshDir();
   try {
     const mcp = new Mcp(dir);
-    const state = mcp.addServer({ name: 'notes', kind: 'stdio', command: 'bun run server.js --fast' });
+    const state = mcp.addServer({ name: 'notes', kind: 'stdio', command: 'bun run "server with spaces.js" --fast' });
     expect(state.servers.map((server) => server.name)).toEqual(['notes']);
-    expect(JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).servers.notes).toEqual({ transport: 'stdio', command: 'bun', args: ['run', 'server.js', '--fast'], enabled: true });
+    expect(JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).servers.notes).toEqual({ transport: 'stdio', command: 'bun', args: ['run', 'server with spaces.js', '--fast'], enabled: true });
     expect(() => mcp.addServer({ name: 'notes', kind: 'stdio', command: 'bun x' })).toThrow('already exists');
     expect(() => mcp.addServer({ name: 'bad/name', kind: 'stdio', command: 'bun x' })).toThrow('no slashes');
     expect(() => mcp.addServer({ name: 'webby', kind: 'http', url: 'ftp://nope' })).toThrow('http(s)');

@@ -14,7 +14,7 @@ function fixture(failListen = false) {
     listening = true; complete = handler;
     return () => { listening = false; closed++; };
   };
-  const service = new ProviderConnections({ read: () => saved, write: (data) => { saved = data; } }, async (url) => {
+  const service = new ProviderConnections({ read: () => saved, write: (data) => { saved = data; }, resetUnreadable: () => { saved = { version: 1 }; } }, async (url) => {
     expect(listening).toBe(true); authorization = url;
   }, () => {}, (async () => Response.json({ access_token: 'access', refresh_token: 'refresh', expires_in: 3600, id_token: `a.${Buffer.from(JSON.stringify({ chatgpt_account_id: 'account' })).toString('base64url')}.b` })) as unknown as typeof fetch, Date.now, listen);
   return { service, closed: () => closed, authorization: () => authorization, complete: () => complete(`http://localhost:1455/auth/callback?code=code&state=${new URL(authorization).searchParams.get('state')}`) };

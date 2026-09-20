@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EncryptedVault, ProviderConnections, type Vault } from '@electron/provider-connections';
@@ -10,7 +10,7 @@ function fixture(fetcher: (url: string, options: RequestInit) => Promise<Respons
   let authorization = '';
   let now = 1000;
   const events: unknown[] = [];
-  const service = new ProviderConnections({ read: () => saved, write: (value) => { saved = value; } }, async (url) => { authorization = url; }, (state) => events.push(state), fetcher as typeof fetch, () => now, async () => () => {});
+  const service = new ProviderConnections({ read: () => saved, write: (value) => { saved = value; }, resetUnreadable: () => { saved = { version: 1 }; } }, async (url) => { authorization = url; }, (state) => events.push(state), fetcher as typeof fetch, () => now, async () => () => {});
   return { service, events, saved: () => saved, authorization: () => new URL(authorization), expire: () => { now += 300001; }, callback: () => `http://localhost:1455/auth/callback?state=${new URL(authorization).searchParams.get('state')}&code=secret-code` };
 }
 function tokens() {
@@ -103,8 +103,14 @@ test('vault delegates encryption, uses private permissions, and preserves corrup
     writeFileSync(file, 'corrupt');
     expect(() => vault.read()).toThrow('not overwritten');
     expect(readFileSync(file, 'utf8')).toBe('corrupt');
+    vault.resetUnreadable();
+    expect(vault.read()).toEqual({ version: 1 });
+    const backup = readdirSync(dir).find((name) => name.startsWith('vault.unreadable-'));
+    expect(backup).toBeTruthy();
+    expect(readFileSync(join(dir, backup!), 'utf8')).toBe('corrupt');
+    expect(() => vault.resetUnreadable()).toThrow('readable');
     const unavailable = new EncryptedVault(file, { ...encryption, isEncryptionAvailable: () => false });
     expect(() => unavailable.write({ version: 1 })).toThrow('unavailable');
-    expect(readFileSync(file, 'utf8')).toBe('corrupt');
+    expect(() => unavailable.resetUnreadable()).toThrow('unavailable');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

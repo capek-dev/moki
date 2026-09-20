@@ -97,6 +97,41 @@ test('webfetch blocks local, metadata, private DNS, and private redirect destina
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
+test('webfetch retries every vetted address and prefers IPv4 when IPv6 is unavailable', async () => {
+  const attempted: string[] = [];
+  const requestAddress: NonNullable<WebfetchDependencies['requestAddress']> = async (_url, address) => {
+    attempted.push(address);
+    if (address === '93.184.216.34') return response('<title>Reachable</title><p>Done</p>');
+    throw Object.assign(new Error(`connect failed ${address}`), { code: 'ECONNREFUSED' });
+  };
+  const result = await executeWebfetch(
+    { url: 'https://example.com' },
+    new AbortController().signal,
+    { resolveHost: async () => ['2606:2800:220:1:248:1893:25c8:1946', '93.184.216.34'], requestAddress },
+  );
+  expect(result.isError).toBe(false);
+  expect(result.text).toContain('Reachable');
+  expect(attempted).toEqual(['93.184.216.34']);
+});
+
+test('webfetch returns an actionable bounded network error after every address fails', async () => {
+  const attempted: string[] = [];
+  const requestAddress: NonNullable<WebfetchDependencies['requestAddress']> = async (_url, address) => {
+    attempted.push(address);
+    throw Object.assign(new Error(`connect failed ${address}`), { code: 'ECONNREFUSED' });
+  };
+  const result = await executeWebfetch(
+    { url: 'https://example.com' },
+    new AbortController().signal,
+    { resolveHost: async () => ['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946'], requestAddress },
+  );
+  expect(result.isError).toBe(true);
+  expect(result.text).toContain('Network request failed:');
+  expect(result.text).toContain('ECONNREFUSED');
+  expect(result.text.length).toBeLessThan(400);
+  expect(attempted).toEqual(['93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946']);
+});
+
 test('webfetch follows bounded public redirects and reports the final URL', async () => {
   const fetcher = mock(async (url: string | URL | Request) => String(url).endsWith('/start')
     ? new Response(null, { status: 301, headers: { location: '/final' } })
@@ -134,6 +169,9 @@ test('webfetch rejects errors and oversized responses, and propagates host cance
 
   const missing = mock(async () => new Response('missing', { status: 404 })) as unknown as typeof fetch;
   expect(await executeWebfetch({ url: 'https://example.com/missing' }, signal, dependencies(missing))).toMatchObject({ isError: true, text: 'Request failed with status 404.' });
+
+  const broken = mock(async () => { throw Object.assign(new Error('socket unavailable'), { code: 'ECONNREFUSED' }); }) as unknown as typeof fetch;
+  expect(await executeWebfetch({ url: 'https://example.com' }, signal, dependencies(broken))).toMatchObject({ isError: true, text: 'Network request failed: ECONNREFUSED: socket unavailable' });
 
   const abort = new AbortController();
   abort.abort();

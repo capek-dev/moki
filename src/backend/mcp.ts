@@ -55,6 +55,39 @@ interface Connection {
 }
 
 // Minimal stdio JSON-RPC client, generalized from the Cua transport.
+export function parseLocalCommand(command: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  let started = false;
+  for (const character of command) {
+    if (escaped) { word += character; escaped = false; started = true; continue; }
+    if (character === '\\' && quote !== "'") { escaped = true; started = true; continue; }
+    if (quote) {
+      if (character === quote) quote = null;
+      else word += character;
+      started = true;
+      continue;
+    }
+    if (character === "'" || character === '"') { quote = character; started = true; continue; }
+    if (/\s/.test(character)) {
+      if (started) { words.push(word); word = ''; started = false; }
+      continue;
+    }
+    word += character; started = true;
+  }
+  if (quote || escaped) throw new Error('Command has an unfinished quote or escape.');
+  if (started) words.push(word);
+  return words;
+}
+
+export function expandLocalHome(value: string, home: string | undefined): string {
+  if (!home) return value;
+  if (value === '~') return home;
+  return value.startsWith('~/') ? home + value.slice(1) : value;
+}
+
 class StdioConnection implements Connection {
   private child: ChildProcessWithoutNullStreams;
   private buffer = '';
@@ -62,10 +95,18 @@ class StdioConnection implements Connection {
   private closed = false;
   private spawnError: Error | null = null;
   private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-  constructor(private label: string, command: string, args: string[]) {
+  constructor(private label: string, command: string, args: string[], environment: NodeJS.ProcessEnv) {
     // detached: the child leads its own process group, so close() can take
     // down wrapper processes (npx) together with the actual server child.
-    this.child = spawn(command, args, { shell: false, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    // The host imports the user's login PATH once; direct spawning remains
+    // shell-free so command arguments and MCP stdio stay deterministic.
+    const home = environment.HOME;
+    this.child = spawn(expandLocalHome(command, home), args.map((argument) => expandLocalHome(argument, home)), {
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+      env: environment,
+    });
     this.child.stderr.resume(); // Drain; never surfaced to the renderer.
     this.child.on('error', (error) => {
       console.error(`[moki] mcp "${this.label}" process error: ${error instanceof Error ? error.message : String(error)}`);
@@ -222,12 +263,12 @@ class HttpConnection implements Connection {
 }
 
 // The connection factory both catalog fetches and per-turn sessions use.
-function openConnection(key: string, config: McpServerConfig, authHeaders?: Record<string, string> | null): Connection {
+function openConnection(key: string, config: McpServerConfig, environment: NodeJS.ProcessEnv, authHeaders?: Record<string, string> | null): Connection {
   // The sign-in overlay wins over anything hand-written in the config file.
   const headers = { ...config.headers, ...(authHeaders ?? {}) };
   return config.transport === 'http'
     ? new HttpConnection(key, config.url!, headers)
-    : new StdioConnection(key, config.command!, config.args);
+    : new StdioConnection(key, config.command!, config.args, environment);
 }
 
 // Newline-delimited JSON-RPC MCP server used by tests and runtime checks: a
@@ -273,7 +314,7 @@ export class Mcp {
   // to the config file or disk.
   private authHeaders = new Map<string, Record<string, string>>();
 
-  constructor(dataDir: string, private store?: Store) {
+  constructor(dataDir: string, private store?: Store, private environment: NodeJS.ProcessEnv = process.env) {
     this.configPath = join(dataDir, 'mcp.json');
   }
 
@@ -397,7 +438,7 @@ export class Mcp {
 
   // One fetch per server: a short-lived connection, closed either way.
   private async fetchCatalog(key: string, config: McpServerConfig): Promise<{ tools: McpCatalogTool[]; error: string | null; needsAuth?: boolean }> {
-    const connection = openConnection(key, config, this.authHeaders.get(key));
+    const connection = openConnection(key, config, this.environment, this.authHeaders.get(key));
     const started = Date.now();
     const budget = () => Math.max(1500, FETCH_DEADLINE_MS - (Date.now() - started));
     try {
@@ -522,7 +563,8 @@ export class Mcp {
     if (input.kind === 'stdio') {
       const command = typeof input.command === 'string' ? input.command.trim() : '';
       if (!command) throw new Error('Enter the command the app runs from.');
-      const [binary, ...args] = command.split(/\s+/);
+      const [binary, ...args] = parseLocalCommand(command);
+      if (!binary) throw new Error('Enter the command the app runs from.');
       this.write((servers) => { servers[name] = { transport: 'stdio', command: binary, args, enabled: true }; });
       return this.buildState({ servers: [...parsed.servers, { key: name, config: { transport: 'stdio', command: binary, args, url: null, headers: {}, enabled: true, disabledTools: [], denyTools: [] } }], diagnostics: parsed.diagnostics });
     }
@@ -579,7 +621,7 @@ export class Mcp {
     const ensure = (key: string): Promise<void> => {
       if (!ready.has(key)) {
         const server = byKey.get(key)!;
-        const connection = openConnection(key, server.config, this.authHeaders.get(key));
+        const connection = openConnection(key, server.config, this.environment, this.authHeaders.get(key));
         sessions.set(key, connection);
         const init = (async () => {
           await connection.request('initialize', { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO }, REQUEST_TIMEOUT_MS);

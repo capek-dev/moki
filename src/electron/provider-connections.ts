@@ -8,20 +8,22 @@ const CLIENT = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const REDIRECT = 'http://localhost:1455/auth/callback';
 interface Secrets { version: 1; deepseek?: string; codex?: { access: string; refresh: string; expires: number; accountId: string } }
 interface Encryption { isEncryptionAvailable(): boolean; encryptString(value: string): Buffer; decryptString(value: Buffer): string }
-export interface Vault { read(): Secrets; write(value: Secrets): void }
+export interface Vault { read(): Secrets; write(value: Secrets): void; resetUnreadable(): void }
 export class EncryptedVault implements Vault {
   constructor(private path: string, private encryption: Encryption) {}
   private check() { if (!this.encryption.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable. Nothing was saved.'); }
+  private decode(bytes: Buffer): Secrets {
+    const data = JSON.parse(this.encryption.decryptString(bytes));
+    if (data?.version !== 1 || (data.deepseek !== undefined && !validString(data.deepseek)) || (data.codex !== undefined && (!validString(data.codex.access) || !validString(data.codex.refresh) || !validString(data.codex.accountId) || !Number.isFinite(data.codex.expires)))) throw new Error();
+    return data;
+  }
   read(): Secrets {
     this.check();
     let bytes: Buffer;
     try { bytes = readFileSync(this.path); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1 }; throw new Error('Cannot read saved credentials.'); }
-    try {
-      const data = JSON.parse(this.encryption.decryptString(bytes));
-      if (data?.version !== 1 || (data.deepseek !== undefined && !validString(data.deepseek)) || (data.codex !== undefined && (!validString(data.codex.access) || !validString(data.codex.refresh) || !validString(data.codex.accountId) || !Number.isFinite(data.codex.expires)))) throw new Error();
-      return data;
-    } catch { throw new Error('Saved credentials could not be decrypted or are invalid. They were not overwritten.'); }
+    try { return this.decode(bytes); }
+    catch { throw new Error('Saved credentials could not be decrypted or are invalid. They were not overwritten.'); }
   }
   write(value: Secrets) {
     this.check();
@@ -30,6 +32,28 @@ export class EncryptedVault implements Vault {
     const temporary = this.path + '.' + randomBytes(8).toString('hex');
     try { writeFileSync(temporary, encrypted, { mode: 0o600, flag: 'wx' }); renameSync(temporary, this.path); }
     catch { try { unlinkSync(temporary); } catch {} throw new Error('Could not securely save credentials.'); }
+  }
+  resetUnreadable() {
+    this.check();
+    let bytes: Buffer;
+    try { bytes = readFileSync(this.path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('No saved provider credentials need recovery.');
+      throw new Error('Cannot read saved credentials.');
+    }
+    try { this.decode(bytes); }
+    catch {
+      const backup = this.path + '.unreadable-' + randomBytes(8).toString('hex');
+      try {
+        renameSync(this.path, backup);
+        this.write({ version: 1 });
+        return;
+      } catch {
+        try { renameSync(backup, this.path); } catch {}
+        throw new Error('Could not reset saved credentials. The original file was kept.');
+      }
+    }
+    throw new Error('Saved provider credentials are readable and were not reset.');
   }
 }
 function validString(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 32000; }
@@ -63,6 +87,12 @@ export class ProviderConnections {
   async handle(input: unknown): Promise<ProviderState> {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid provider request.');
     const command = input as ProviderCommand;
+    if (command.action === 'resetUnreadable') {
+      this.vault.resetUnreadable();
+      this.invalidate('deepseek'); this.invalidate('codex');
+      this.secrets = { version: 1 }; this.authError = undefined; this.emit();
+      return this.status();
+    }
     this.load();
     switch (command.action) {
       case 'status': return this.status();

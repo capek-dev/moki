@@ -12,6 +12,8 @@ export function ProvidersSection() {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [recoveryArmed, setRecoveryArmed] = useState(false);
   const revision = useRef(-1);
   const lock = useRef(false);
   function accept(next: ProviderState) {
@@ -20,8 +22,11 @@ export function ProvidersSection() {
   }
   async function run(command: ProviderCommand) {
     if (lock.current) return;
-    lock.current = true; setBusy(true); setError('');
-    try { accept(await window.moki.providers(command)); }
+    lock.current = true; setBusy(true); setError(''); setNotice('');
+    try {
+      accept(await window.moki.providers(command));
+      if (command.action === 'resetUnreadable') setNotice('Saved provider credentials were backed up and reset. Enter your key or sign in again.');
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Connection failed.'); }
     finally { lock.current = false; setBusy(false); }
   }
@@ -67,9 +72,19 @@ export function ProvidersSection() {
     <JevCard />
     {state?.error && <Panel className="text-[12.5px] text-danger" role="alert">{state.error}</Panel>}
     {busy && <p className="text-[12px] text-ink-3" role="status">Connecting…</p>}
-    {error && <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-[color-mix(in_oklab,var(--danger)_28%,transparent)] bg-danger-soft px-3 py-2.5 text-[12.5px] text-danger">
+    {notice && <p className="text-[12.5px] text-ink-2" role="status">{notice}</p>}
+    {error && <div role="alert" className="grid gap-2 rounded-xl border border-[color-mix(in_oklab,var(--danger)_28%,transparent)] bg-danger-soft px-3 py-2.5 text-[12.5px] text-danger">
       <span>{error}</span>
-      {!state && <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run({ action: 'status' })}>Retry</Button>}
+      {!state && recoveryArmed && <span>This keeps the unreadable encrypted file as a backup, then creates an empty credential store. You will need to enter provider credentials again.</span>}
+      {!state && <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run({ action: 'status' })}>Retry</Button>
+        {!recoveryArmed
+          ? <Button variant="danger" size="sm" disabled={busy} onClick={() => setRecoveryArmed(true)}>Reset saved credentials</Button>
+          : <>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRecoveryArmed(false)}>Cancel</Button>
+            <Button variant="danger" size="sm" disabled={busy} onClick={() => { setRecoveryArmed(false); void run({ action: 'resetUnreadable' }); }}>Back up and reset</Button>
+          </>}
+      </div>}
     </div>}
   </div>;
 }
