@@ -57,8 +57,8 @@ export class Runtime {
     return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials, toolLoading, memoryJevKey: toolLoading?.key });
   }
   request(request: Request): Promise<Result> { return this.send(request); }
-  runLearning(runId: string, model: string, credentials: Credentials, credentialRevision: number): Promise<Result> {
-    return this.send({ method: 'learningRun', runId, model, credentials, credentialRevision });
+  runLearning(runId: string, model: string, credentials: Credentials, credentialRevision: number, jevKey?: string): Promise<Result> {
+    return this.send({ method: 'learningRun', runId, model, credentials, credentialRevision, ...(jevKey === undefined ? {} : { jevKey }) });
   }
   failLearning(runId: string, error: string): Promise<Result> {
     return this.send({ method: 'learningFail', runId, error: error.slice(0, 240) });

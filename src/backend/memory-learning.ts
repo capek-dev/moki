@@ -127,8 +127,13 @@ export interface LearningRunPage {
   nextOffset: number | null;
 }
 
+/** Review result plus optional Jev source-support verdicts keyed by proposal index. */
+export interface LearningReviewerOutcome {
+  proposals: readonly LearningProposal[];
+  rejections?: ReadonlyMap<number, string>;
+}
 export interface LearningReviewer {
-  (sources: readonly LearningSource[], signal: AbortSignal, context: LearningReviewContext): Promise<readonly LearningProposal[]>;
+  (sources: readonly LearningSource[], signal: AbortSignal, context: LearningReviewContext): Promise<readonly LearningProposal[] | LearningReviewerOutcome>;
 }
 
 export interface LearningTimer {
@@ -656,18 +661,20 @@ export class MemoryLearningRepository {
     return !!row && row.enabled === 1 && row.paused === 0 && row.memoryEnabled === 1 && row.cancelRequested === 0 && row.status === 'running' && row.provider === settings.provider && row.model === settings.model;
   }
 
-  saveProposals(runId: string, proposals: readonly LearningProposal[]) {
+  saveProposals(runId: string, proposals: readonly LearningProposal[], rejections?: ReadonlyMap<number, string>) {
     const id = requireUuid(runId, 'learning run id');
     if (proposals.length > LEARNING_MAX_PROPOSALS) throw new Error('Learning proposal limit exceeded.');
     if (!this.runCanCommit(id)) throw new Error('Learning run was cancelled or disabled.');
     this.db.transaction(() => {
       if (!this.runCanCommit(id)) throw new Error('Learning run was cancelled or disabled.');
-      for (const proposal of proposals) {
+      for (const [index, proposal] of proposals.entries()) {
         const normalized = normalizeProposal(proposal);
         const source = proposalSource(normalized);
         const op = operationId(normalized);
         const proposalId = normalized.kind === 'memory' && normalized.action === 'add' ? deterministicId(op) : crypto.randomUUID();
-        this.db.query('INSERT OR IGNORE INTO learning_proposals (id, runId, operationId, kind, payload, sourceMessageId, sourceRevision, sourceRole, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'pending\')').run(proposalId, id, op, normalized.kind, JSON.stringify(normalized), source.sourceMessageId, source.sourceRevision, source.sourceRole);
+        // A Jev source-support verdict arrives as a terminal rejection before apply.
+        const rejection = rejections?.get(index);
+        this.db.query('INSERT OR IGNORE INTO learning_proposals (id, runId, operationId, kind, payload, sourceMessageId, sourceRevision, sourceRole, status, rejection) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(proposalId, id, op, normalized.kind, JSON.stringify(normalized), source.sourceMessageId, source.sourceRevision, source.sourceRole, rejection === undefined ? 'pending' : 'rejected', rejection === undefined ? null : rejection.slice(0, 240));
       }
     })();
   }
@@ -687,6 +694,8 @@ export class MemoryLearningRepository {
       if (!run) throw new Error('Learning run not found.');
       const proposals = this.proposalsForRun(id);
       for (const proposal of proposals) {
+        // Pre-rejected proposals (Jev source check) are final for this run.
+        if (proposal.status !== 'pending') continue;
         if (signal?.aborted || !this.runCanCommit(id)) throw new Error('Learning run was cancelled or disabled.');
         this.db.exec('SAVEPOINT learning_proposal');
         try {
@@ -1083,7 +1092,7 @@ export class LearningCoordinator {
       const sources = requestedRunId ? this.repository.reviewSourcesForRun(runId) : target.sources!;
       const context = this.repository.reviewContext();
       const review = reviewer(sources, abort.signal, context);
-      const proposals = await new Promise<readonly LearningProposal[]>((resolve, reject) => {
+      const proposals = await new Promise<readonly LearningProposal[] | LearningReviewerOutcome>((resolve, reject) => {
         let settled = false;
         const timerApi = this.timerApi();
         const finish = (callback: () => void) => { if (settled) return; settled = true; timerApi.clearTimeout(timer); abort.signal.removeEventListener('abort', onAbort); callback(); };
@@ -1093,7 +1102,8 @@ export class LearningCoordinator {
         void review.then((value) => finish(() => resolve(value)), (error) => finish(() => reject(error)));
       });
       if (generation !== this.running?.generation || abort.signal.aborted) throw new Error('Learning review was cancelled.');
-      this.repository.saveProposals(runId, proposals);
+      const outcome: LearningReviewerOutcome = 'proposals' in proposals ? proposals : { proposals };
+      this.repository.saveProposals(runId, outcome.proposals, outcome.rejections);
       const result = this.repository.applyRun(runId, this.clock.now(), abort.signal);
       this.events.stateChanged?.();
       return result;

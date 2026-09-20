@@ -11,6 +11,7 @@ import { smartToolbag } from './tool-scoring';
 import { sessionSearchToolbag } from '@backend/session-search-tool';
 import { composeBuiltInToolbags, memoryToolbag } from '@backend/memory-tool';
 import { LearningCoordinator, reviewWithModel } from '@backend/memory-learning';
+import { verifyLearningSupport } from '@backend/learning-verify';
 import type { Credentials } from '@backend/chat';
 import type { Result } from '@shared/protocol';
 // Import the published composition entry point in the compiled runtime proof.
@@ -68,8 +69,12 @@ async function handleMcp(id: string, request: { method: 'mcpTools' } | { method:
     : mcp.setTool(request.server, request.tool, request.disabled);
   console.log(JSON.stringify({ id, result: stamp({ snapshot: store.snapshot(), mcp: state }) }));
 }
-async function runLearning(request: { method: 'learningRun'; runId?: unknown; credentials?: unknown; model?: unknown }) {
+async function runLearning(request: { method: 'learningRun'; runId?: unknown; credentials?: unknown; model?: unknown; jevKey?: unknown }) {
   if (typeof request.runId !== 'string' || !request.credentials || typeof request.credentials !== 'object' || typeof request.model !== 'string') throw new Error('Invalid learning runtime request.');
+  const jevKey = request.jevKey;
+  if (jevKey !== undefined) {
+    if (typeof jevKey !== 'string' || !jevKey.trim() || jevKey.length > 1000 || /[\r\n]/.test(jevKey)) throw new Error('Invalid Jev verification key.');
+  }
   const credentials = request.credentials as Credentials;
   if (credentials.provider !== 'deepseek' && credentials.provider !== 'codex') throw new Error('Invalid learning provider.');
   const configuration = store.learningRepository.runConfiguration(request.runId);
@@ -78,7 +83,20 @@ async function runLearning(request: { method: 'learningRun'; runId?: unknown; cr
     const runId = request.runId as string;
     const publishOutput = (text: string) => console.log(JSON.stringify({ event: 'state', result: { snapshot: { assistants: [], conversations: [], messages: [], attachments: [] }, learningLiveOutput: { runId, text } } }));
     const observedGenerate = observeLearningReview(generate, publishOutput);
-    return reviewWithModel(observedGenerate, credentials.provider, request.model as string, credentials, runId, sources, signal, context);
+    return (async () => {
+      const proposals = await reviewWithModel(observedGenerate, credentials.provider, request.model as string, credentials, runId, sources, signal, context);
+      if (request.jevKey === undefined) return proposals;
+      // Jev source-support gate: one bounded request per run. Any transport or
+      // shape failure leaves learning working without the gate.
+      try {
+        const verification = await verifyLearningSupport(jevKey!, proposals, sources, signal);
+        return verification.rejections.size ? { proposals, rejections: verification.rejections } : proposals;
+      } catch (error) {
+        if (signal.aborted) throw error;
+        console.error(`[moki] learning verification unavailable, continuing without it: ${error instanceof Error ? error.message : String(error)}`);
+        return proposals;
+      }
+    })();
   }, undefined, request.runId);
 }
 async function failLearning(request: { method: 'learningFail'; runId?: unknown; error?: unknown }) {

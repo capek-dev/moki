@@ -180,8 +180,10 @@ else {
           const credentialRevision = providers!.status().revision;
           const credentials = await providers!.credentials(due.provider);
           if (providers!.status().revision !== credentialRevision) throw new Error('Provider credentials changed.');
+          // The Jev source-support gate rides along whenever a TypeSafe key is saved.
+          const jevKey = toolLoading.config().key;
           activeLearning.set(due.runId, due.provider);
-          await runtime!.runLearning(due.runId, due.model, credentials, credentialRevision);
+          await runtime!.runLearning(due.runId, due.model, credentials, credentialRevision, jevKey);
         } catch (error) {
           try { await runtime!.failLearning(due.runId, error instanceof Error ? error.message : 'Learning provider unavailable.'); } catch (failure) { console.error('[moki] learning failure report failed:', failure instanceof Error ? failure.message : String(failure)); }
         } finally {
@@ -346,9 +348,9 @@ else {
       } finally { if (pendingChats.get(id) === pending) pendingChats.delete(id); }
     });
     window.on('close', (event) => { if (!quitting) { event.preventDefault(); window?.hide(); } });
-    // A text tray item works without shipping a placeholder binary image asset.
-    tray = new Tray(nativeImage.createEmpty());
-    tray.setTitle('●');
+    const trayImage = nativeImage.createFromPath(join(appRoot, 'dist/electron/assets/mokiTemplate.png'));
+    trayImage.setTemplateImage(true);
+    tray = new Tray(trayImage);
     tray.setToolTip('Moki');
     const startCapture = () => { void capture!.start().catch((error) => dialog.showErrorBox('Could not capture region', String(error))); };
     const shortcutRegistered = globalShortcut.register('CommandOrControl+Shift+8', startCapture);

@@ -111,7 +111,7 @@ test('renderer memory state rejects stale events and refreshes only newer revisi
   expect(MEMORY_DISABLED_COPY).toContain('active prompt');
   expect(MEMORY_FORGET_SCOPE_COPY).toContain('Conversation history and migration backups are retained.');
   expect(MEMORY_FORGET_SCOPE_COPY).toContain('not full conversation or backup erasure');
-  const settingsSource = await Bun.file('src/renderer/components/settings/memory-settings.tsx').text();
+  const settingsSource = await Bun.file('src/renderer/components/settings/memory/memories-browser.tsx').text();
   expect(settingsSource).toContain('aria-label="Memory forgetting scope"');
   expect(settingsSource).toContain('MEMORY_FORGET_SCOPE_COPY');
 });

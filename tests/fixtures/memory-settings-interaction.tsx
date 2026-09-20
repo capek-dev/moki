@@ -8,7 +8,8 @@ const { MemorySettings } = await import('@renderer/components/settings/memory-se
 const snapshot = { assistants: [], conversations: [], messages: [], attachments: [] };
 let memory = { enabled: false, recall: 'basic', jevConsent: false, jevModel: 'jev-latest', revision: 1 };
 const learning = { enabled: true, paused: false, provider: 'deepseek', model: 'deepseek-flash', revision: 1 };
-let listener: (r: any) => void = () => {};
+const listeners = new Set<(r: any) => void>();
+const emit = (r: any) => { for (const listener of [...listeners]) listener(r); };
 let count = 0;
 const run = { id: 'run', status: 'failed', outcome: 'failed', provider: 'deepseek', model: 'deepseek-flash', attempt: 3, createdAt: 1, appliedCount: 0, rejectedCount: 0, error: 'Timed out', sourceManifest: 'captured' };
 let resolveDetail: ((r: any) => void) | undefined;
@@ -17,7 +18,7 @@ let partial = false;
 let openedRun = '';
 (dom as any).moki = {
   openLearningReview: async (id: string) => { openedRun = id; },
-  onState: (fn: any) => { listener = fn; return () => { listener = () => {}; }; },
+  onState: (fn: any) => { listeners.add(fn); return () => { listeners.delete(fn); }; },
   request: async (r: any) => {
     assert.ok(++count < 100, 'request loop');
     const base = { snapshot };
@@ -31,7 +32,7 @@ let openedRun = '';
       case 'memoryRead': return { ...base, memoryDetail: { ...saved, textPage: saved.text, textNextOffset: partial ? 10 : null, evidence: [], evidenceTruncated: false } };
       case 'memoryConnections': return { ...base, memoryConnections: { connections: [], nextOffset: null } };
       case 'memoryRecallHistory': return { ...base, memoryRecallHistory: { records: [], offset: 0, nextOffset: null } };
-      case 'memorySetEnabled': memory = { ...memory, enabled: r.enabled, revision: memory.revision + 1 }; listener({ ...base, memory }); return { ...base, memory };
+      case 'memorySetEnabled': memory = { ...memory, enabled: r.enabled, revision: memory.revision + 1 }; emit({ ...base, memory }); return { ...base, memory };
       default: return base;
     }
   },
@@ -49,7 +50,7 @@ assert.ok(dom.document.body.textContent.includes('Memory: On'));
 assert.ok(dom.document.body.textContent.includes('Learning: Enabled'));
 const inspect = [...dom.document.querySelectorAll('button')].find(b => b.textContent.includes('Inspect run'))!;
 await act(async () => inspect.click());
-await act(async () => listener({ snapshot, learning }));
+  await act(async () => emit({ snapshot, learning }));
 await act(async () => resolveDetail!({ snapshot, learningRunDetail: { run, sources: [], proposals: [], changes: [], truncated: false } }));
 assert.ok(dom.document.body.textContent.includes('Run details'), 'run list refresh must not cancel detail');
 const settled = count;
@@ -64,7 +65,7 @@ await act(async () => {
   Object.getOwnPropertyDescriptor(dom.HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Unsaved personal edit');
   textarea.dispatchEvent(new dom.Event('input', { bubbles: true }));
 });
-await act(async () => listener({ snapshot, memory: { ...memory, revision: memory.revision + 1 } }));
+  await act(async () => emit({ snapshot, memory: { ...memory, revision: memory.revision + 1 } }));
 assert.equal((dom.document.querySelector('#memory-text') as any).value, 'Unsaved personal edit');
 assert.ok(dom.document.body.textContent.includes('Your draft is preserved'));
 assert.equal((button('Save text') as any).disabled, true);

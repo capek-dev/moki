@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act } from 'react';
-import { ToolLoadingSettings } from '../src/renderer/components/settings/tool-loading-settings';
+import { JevCard } from '../src/renderer/components/settings/providers/jev-card';
 import type { ToolLoadingCommand, ToolLoadingState } from '../src/shared/tool-loading';
 
 test('settings loads state, saves key and cap, clears password and receives pushed updates', async () => {
@@ -26,7 +26,7 @@ test('settings loads state, saves key and cap, clears password and receives push
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(host as unknown as HTMLElement);
   try {
-    await act(async () => { root.render(<ToolLoadingSettings />); });
+    await act(async () => { root.render(<JevCard />); });
     expect(commands[0]).toEqual({ action: 'status' });
     const password = host.querySelector('#typesafe-key')! as any;
     expect(password.type).toBe('password');

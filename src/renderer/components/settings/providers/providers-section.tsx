@@ -1,17 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProviderCommand, ProviderState } from '@shared/protocol';
 import { Button } from '@renderer/components/ui/button';
-import { Panel } from '@renderer/components/ui/panel';
 import { Field, Input } from '@renderer/components/ui/field';
+import { Panel } from '@renderer/components/ui/panel';
+import { ProviderCard } from './provider-card';
+import { JevCard } from './jev-card';
 
-function StatusChip({ on, label }: { on: boolean; label: string }) {
-  return <span className="inline-flex items-center gap-1.5 text-[12px] text-ink-2">
-    <span className={`h-2 w-2 rounded-full ${on ? 'bg-ok' : 'bg-ink-3/60'}`} aria-hidden="true" />
-    {label}
-  </span>;
-}
-
-export function ProviderSettings() {
+/** Every external connection in one list: two chat providers plus the TypeSafe Jev service. */
+export function ProvidersSection() {
   const [state, setState] = useState<ProviderState>();
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -34,13 +30,13 @@ export function ProviderSettings() {
     void run({ action: 'status' });
     return unsubscribe;
   }, []);
-  return <div className="grid max-w-md gap-3">
-    <p className="text-[12.5px] text-ink-3">Credentials are encrypted on this Mac. Choose this provider in Moki settings, then select a model in chat.</p>
-    <Panel className="grid gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[13.5px] font-semibold">DeepSeek</h3>
-        <StatusChip on={!!state?.deepseek.connected} label={state?.deepseek.connected ? 'Key verified and saved' : 'No key saved'} />
-      </div>
+  return <div className="grid gap-3">
+    <ProviderCard
+      name="DeepSeek"
+      description="API-key chat provider."
+      connected={!!state?.deepseek.connected}
+      statusLabel={state?.deepseek.connected ? 'Key verified and saved' : 'No key saved'}
+    >
       <form className="grid gap-2.5" onSubmit={(e) => { e.preventDefault(); const value = key.trim(); setKey(''); void run({ action: 'saveDeepseek', key: value }); }}>
         <Field label="API key" htmlFor="deepseek-key">
           <Input id="deepseek-key" type="password" autoComplete="off" spellCheck={false} maxLength={1000} value={key} disabled={busy} placeholder="sk-…" onChange={(e) => setKey(e.target.value)} />
@@ -50,12 +46,13 @@ export function ProviderSettings() {
           <Button variant="primary" size="sm" type="submit" disabled={busy || !key.trim() || !state}>Verify and save key</Button>
         </div>
       </form>
-    </Panel>
-    <Panel className="grid gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[13.5px] font-semibold">Codex subscription</h3>
-        <StatusChip on={!!state?.codex.connected} label={state?.codex.connected ? 'Credentials saved' : 'Not signed in'} />
-      </div>
+    </ProviderCard>
+    <ProviderCard
+      name="Codex subscription"
+      description="Sign in with your ChatGPT account."
+      connected={!!state?.codex.connected}
+      statusLabel={state?.codex.connected ? 'Credentials saved' : 'Not signed in'}
+    >
       <div className="flex justify-end gap-2">
         {state?.codex.connected && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void run({ action: 'disconnect', provider: 'codex' })}>Disconnect</Button>}
         <Button variant="secondary" size="sm" disabled={busy || !state || state.signingIn} onClick={() => void run({ action: 'startCodex' })}>{state?.codex.connected ? 'Replace sign-in' : 'Sign in with ChatGPT'}</Button>
@@ -66,8 +63,9 @@ export function ProviderSettings() {
           <Button variant="ghost" size="sm" onClick={() => void window.moki.providers({ action: 'cancelCodex' }).then(accept).catch(() => setError('Could not cancel sign-in.'))}>Cancel sign-in</Button>
         </div>
       </div>}
-    </Panel>
-    {state?.error && <p className="rounded-xl border border-[color-mix(in_oklab,var(--danger)_28%,transparent)] bg-danger-soft px-3 py-2.5 text-[12.5px] text-danger" role="alert">{state.error}</p>}
+    </ProviderCard>
+    <JevCard />
+    {state?.error && <Panel className="text-[12.5px] text-danger" role="alert">{state.error}</Panel>}
     {busy && <p className="text-[12px] text-ink-3" role="status">Connecting…</p>}
     {error && <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-[color-mix(in_oklab,var(--danger)_28%,transparent)] bg-danger-soft px-3 py-2.5 text-[12.5px] text-danger">
       <span>{error}</span>

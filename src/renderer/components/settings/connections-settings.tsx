@@ -212,10 +212,6 @@ export function ConnectionsSettings() {
     : 'Not connected';
   return <div className="grid gap-3">
     <Panel className="grid gap-3">
-      <div>
-        <h3 className="text-[13.5px] font-semibold">Connections</h3>
-        <p className="mt-0.5 text-[12.5px] text-ink-3">Cua Driver plus the apps you connect. You control every connection and every action.</p>
-      </div>
       {overBudget && <p className="text-[12.5px] text-ink-2" role="note">Many tools are connected. Moki loads the largest connections on demand, which adds a small step when it uses them. Turning off connections you rarely use keeps replies quickest.</p>}
       {mcp && servers.length === 0 && !cua && <p className="text-[12.5px] text-ink-2" role="status">Checking connections…</p>}
       <div className="grid gap-3">
