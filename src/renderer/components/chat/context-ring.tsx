@@ -1,4 +1,4 @@
-import { formatTokens, type ContextEstimate } from '@shared/context';
+import { formatTokens, type ContextEstimate, type ContextUsage } from '@shared/context';
 
 function statusFor(percentage: number): 'normal' | 'warning' | 'critical' {
   if (percentage >= 60) return 'critical';
@@ -7,11 +7,12 @@ function statusFor(percentage: number): 'normal' | 'warning' | 'critical' {
 }
 
 // Quiet context window indicator (the Prokop circle): a ring whose fill is the
-// estimated share of the model's context window, colored accent/warn/danger at
+// estimated share of the enforceable input budget, colored accent/warn/danger at
 // 40/60 percent. Hover shows the breakdown tooltip.
-export function ContextRing({ estimate, contextWindow, modelName }: { estimate: ContextEstimate; contextWindow: number; modelName: string }) {
-  const totalTokens = estimate.systemTokens + estimate.textTokens + estimate.imageTokens;
-  const percentage = contextWindow > 0 ? Math.min(100, Math.round((totalTokens / contextWindow) * 100)) : 0;
+export function ContextRing({ estimate, lastRequest, contextWindow, outputReserveTokens, modelName }: { estimate: ContextEstimate; lastRequest?: ContextUsage; contextWindow: number; outputReserveTokens: number; modelName: string }) {
+  const totalTokens = estimate.totalTokens;
+  const inputBudget = Math.max(0, contextWindow - outputReserveTokens);
+  const percentage = inputBudget > 0 ? Math.min(100, Math.round((totalTokens / inputBudget) * 100)) : 0;
   const status = statusFor(percentage);
   const radius = 8;
   const circumference = 2 * Math.PI * radius;
@@ -22,10 +23,14 @@ export function ContextRing({ estimate, contextWindow, modelName }: { estimate: 
   const rows = [
     ['Model', modelName],
     ['Context window', formatTokens(contextWindow)],
-    ['Instructions (est.)', estimate.systemTokens.toLocaleString()],
-    ['History text (est.)', estimate.textTokens.toLocaleString()],
-    ['Screenshots (est.)', estimate.imageTokens.toLocaleString()],
-    ['Estimated total', `${totalTokens.toLocaleString()} · ${percentage}%`],
+    ['Input budget', formatTokens(inputBudget)],
+    ['Output reserve', formatTokens(outputReserveTokens)],
+    ['Draft estimate (heuristic)', `${totalTokens.toLocaleString()} · ${percentage}%`],
+    ['Draft instructions', estimate.systemTokens.toLocaleString()],
+    ['Draft history text', estimate.textTokens.toLocaleString()],
+    ['Draft screenshots', estimate.imageTokens.toLocaleString()],
+    ['Last request (heuristic)', lastRequest ? `${lastRequest.estimate.totalTokens.toLocaleString()} · request ${lastRequest.requestNumber}` : 'Not sent'],
+    ['Provider input (last request)', lastRequest?.providerReported?.inputTokens?.toLocaleString() ?? 'Not reported'],
     ['Messages included', `${estimate.includedMessages} of ${estimate.totalMessages}${estimate.truncated ? ' · capped' : ''}`],
   ] as const;
   return <div className="group relative">
@@ -49,7 +54,7 @@ export function ContextRing({ estimate, contextWindow, modelName }: { estimate: 
           <span className="text-right text-ink-2">{value}</span>
         </div>)}
       </div>
-      <p className="mt-1.5 text-[10px] leading-snug text-ink-3/80">Estimated from message sizes; providers count tokens differently.</p>
+      <p className="mt-1.5 text-[10px] leading-snug text-ink-3/80">Draft and request estimates are heuristics. Provider input is reported usage, not exact billing.</p>
     </div>
   </div>;
 }

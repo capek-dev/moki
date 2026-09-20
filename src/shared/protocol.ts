@@ -1,8 +1,16 @@
 import type { Thinking } from '@shared/models';
+import type { ContextTurn, ContextUsage } from '@shared/context';
+import type { MemoryConnectionsPage, MemoryDetail, MemoryMutationAttribution, MemoryPage, MemoryRecallHistoryPage, MemoryRecallInspection, MemorySettingsState } from '@shared/memory';
+import type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningSettingsState, LearningRunSummary } from '@backend/memory-learning';
+export type { MemoryConnectionsPage, MemoryDetail, MemoryMutationAttribution, MemoryPage, MemoryRecallHistoryPage, MemoryRecallInspection, MemorySettingsState } from '@shared/memory';
+export type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningRunSummary, LearningSettingsState } from '@backend/memory-learning';
 export type Provider = 'deepseek' | 'codex';
 export interface Assistant { id: string; name: string; provider: Provider; instructions: string; appearance?: import('@shared/appearance').Appearance }
 export interface Conversation { id: string; assistantId: string; title: string; model: string | null; thinking: Thinking | null }
-export interface Message { id: string; conversationId: string; text: string; role: 'user' | 'assistant'; status: 'complete' | 'streaming' | 'interrupted' | 'failed'; model: string | null; assistantName: string | null; error: string | null; thinking: Thinking | null; toolCalls?: ToolCallRecord[] }
+// createdAt is UTC milliseconds, or null/undefined when unknown (legacy rows).
+// revision counts published content versions of a message; bump rules live in
+// Store.updateReply (plan 28).
+export interface Message { id: string; conversationId: string; text: string; role: 'user' | 'assistant'; status: 'complete' | 'streaming' | 'interrupted' | 'failed'; model: string | null; assistantName: string | null; error: string | null; thinking: Thinking | null; createdAt?: number | null; revision?: number; toolCalls?: ToolCallRecord[] }
 export interface Attachment { id: string; messageId: string; mime: 'image/png'; byteSize: number; width: number; height: number }
 export type AttachmentDraft = Omit<Attachment, 'messageId'>;
 export interface Snapshot { assistants: Assistant[]; conversations: Conversation[]; messages: Message[]; attachments: Attachment[] }
@@ -25,8 +33,52 @@ export type Request =
   | { method: 'mcpAddServer'; name: string; kind: 'stdio' | 'http'; command?: string; url?: string }
   | { method: 'mcpRemoveServer'; server: string }
   | { method: 'mcpSetServer'; server: string; enabled: boolean }
-  | { method: 'mcpSetTool'; server: string; tool: string; disabled: boolean };
-export interface Result { snapshot: Snapshot; conversationId?: string; revision?: number; cua?: CuaState; mcp?: McpState }
+  | { method: 'mcpSetTool'; server: string; tool: string; disabled: boolean }
+  | { method: 'memorySettings' }
+  | { method: 'memorySetEnabled'; enabled: boolean; expectedRevision: number }
+  | { method: 'memorySetPolicy'; recall: 'basic' | 'jev'; jevConsent: boolean; jevModel: string; expectedRevision: number }
+  | { method: 'memoryRecallHistory'; limit?: number; offset?: number }
+  | { method: 'memoryList'; query?: string; limit?: number; offset?: number }
+  | { method: 'memoryRead'; memoryId: string; expectedRevision?: number; offset?: number; textLimit?: number }
+  | { method: 'memoryConnections'; memoryId: string; limit?: number; offset?: number }
+  | { method: 'memoryUpdate'; memoryId: string; expectedRevision: number; text?: string; pinned?: boolean }
+  | { method: 'memoryForget'; memoryId: string; expectedRevision: number }
+  | { method: 'learningSettings' }
+  | { method: 'learningSetEnabled'; enabled: boolean; expectedRevision: number }
+  | { method: 'learningSetPaused'; paused: boolean; expectedRevision: number }
+  | { method: 'learningSetProviderModel'; provider: Provider; model: string; expectedRevision: number }
+  | { method: 'learningExcludeConversation'; conversationId: string; excluded: boolean }
+  | { method: 'learningHistory'; limit?: number; offset?: number }
+  | { method: 'learningRuns'; limit?: number; offset?: number }
+  | { method: 'learningRunDetail'; runId: string; limit?: number }
+  | { method: 'learningRetry'; runId: string }
+  | { method: 'learningCancel'; runId?: string }
+  | { method: 'learningUndo'; historyId: string; expectedRevision: number };
+export interface LearningLiveOutput { runId: string; text: string }
+export interface Result {
+  learningLiveOutput?: LearningLiveOutput;
+  learningLiveCleared?: boolean;
+  snapshot: Snapshot;
+  conversationId?: string;
+  revision?: number;
+  contextTurn?: ContextTurn;
+  contextUsage?: ContextUsage;
+  cua?: CuaState;
+  mcp?: McpState;
+  memory?: MemorySettingsState;
+  memoryRecall?: MemoryRecallInspection;
+  memoryRecallHistory?: MemoryRecallHistoryPage;
+  memoryAttribution?: MemoryMutationAttribution;
+  memoryPage?: MemoryPage;
+  memoryDetail?: MemoryDetail;
+  memoryConnections?: MemoryConnectionsPage;
+  learning?: LearningSettingsState;
+  learningExclusions?: string[];
+  learningHistory?: LearningHistoryRecord[];
+  learningRuns?: LearningRunPage;
+  learningRunDetail?: LearningRunDetail;
+  learningRun?: LearningRunSummary;
+}
 export type ProviderCommand =
   | { action: 'status' | 'startCodex' | 'cancelCodex' }
   | { action: 'saveDeepseek'; key: string }
@@ -73,6 +125,9 @@ export interface DesktopAPI {
   request(request: Request): Promise<Result>;
   openSettings(): Promise<void>;
   openHistory(): Promise<void>;
+  openLearningReview(runId: string): Promise<void>;
+  readLearningReview(): Promise<{ detail?: LearningRunDetail; output?: LearningLiveOutput }>;
+  onLearningReview(listener: (value: { output?: LearningLiveOutput; refresh?: boolean }) => void): () => void;
   copyText(text: string): Promise<void>;
   openWebLink(url: string): Promise<void>;
   startCapture(): Promise<void>;

@@ -219,3 +219,59 @@ test('history reads are bounded and cross-window stale responses cannot replace 
     expect(state.data?.messages).toHaveLength(100);
   } finally { f.close(); }
 });
+
+test('enabled basic recall is assembled per turn and never saved into assistant instructions', async () => {
+  const store = new Store(':memory:');
+  const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+  const turns: Turn[] = [];
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => { finish = resolve; });
+  const memory = store.memoryRepository.create({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', text: 'I prefer quiet trains.', kind: 'preference', core: true });
+  const chat = new Chat(store, async function* (turn) { turns.push(turn); yield 'ok'; }, (result) => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); }, undefined, undefined, { enabled: true, maxEntries: 4, maxCandidates: 4, maxTextChars: 1000 });
+  try {
+    chat.start({ conversationId: id, text: 'Book a train.', model: 'deepseek-flash', credentials });
+    await done;
+    expect(turns[0].instructions).toContain('<basic_memory_context>');
+    expect(turns[0].instructions).toContain('I prefer quiet trains.');
+    expect(store.assistantFor(id).instructions).toBe('Be helpful, clear, and kind.');
+    expect(memory.id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  } finally { chat.close(); store.close(); }
+});
+
+test('Jev recall aborts on runtime memory disable without retrying or injecting recalled data', async () => {
+  const store = new Store(':memory:');
+  const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+  store.handle({ method: 'memorySetEnabled', enabled: true, expectedRevision: 1 });
+  store.handle({ method: 'memorySetPolicy', recall: 'jev', jevConsent: true, jevModel: 'jev-latest', expectedRevision: 2 });
+  store.memoryGraphRepository.createTopic({ label: 'Travel' });
+  let fetchCalls = 0;
+  let signal!: AbortSignal;
+  let markFetch!: () => void;
+  const fetchStarted = new Promise<void>((resolve) => { markFetch = resolve; });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input, init) => {
+    fetchCalls++;
+    signal = init?.signal as AbortSignal;
+    markFetch();
+    return await new Promise<Response>(() => {});
+  }) as typeof fetch;
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => { finish = resolve; });
+  const turns: Turn[] = [];
+  const chat = new Chat(store, async function* (turn) { turns.push(turn); yield 'ok'; }, (result) => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); }, undefined, undefined, () => store.memoryConfig());
+  try {
+    chat.start({ conversationId: id, text: 'Plan a trip.', model: 'deepseek-flash', credentials, memoryJevKey: 'test-jev-key' });
+    await fetchStarted;
+    expect(signal.aborted).toBe(false);
+    store.handle({ method: 'memorySetEnabled', enabled: false, expectedRevision: 3 });
+    await done;
+    expect(signal.aborted).toBe(true);
+    expect(fetchCalls).toBe(1);
+    expect(turns[0].instructions).not.toContain('<basic_memory_context>');
+    expect(store.messages(id).at(-1)).toMatchObject({ text: 'ok', status: 'complete' });
+  } finally {
+    globalThis.fetch = originalFetch;
+    chat.close();
+    store.close();
+  }
+});

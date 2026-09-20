@@ -3,7 +3,9 @@ import { createOpenAiResponsesModel } from '@capekai/core/providers';
 import { getModelWithMetadata } from '@capekai/core/execution';
 import { createSingleModelConfiguration, withRuntimeConfiguration } from '@capekai/core/configuration';
 import { describeError, type Generate } from '@backend/chat';
-import { requireThinking } from '@shared/models';
+import { requireModel, requireThinking } from '@shared/models';
+import { estimateModelContext, ContextBudgetError, type ContextUpdate } from '@shared/context';
+import { formatClockContext, systemClock, withClockContext, type Clock } from '@shared/clock';
 
 // Multi-step tool loop budget. The AI SDK has no unlimited mode (omitting
 // stopWhen defaults to a single step), so the maximum expressible cap is used;
@@ -24,8 +26,12 @@ export function codexFetch(access: string, accountId: string, fetcher: typeof fe
     });
   }) as typeof fetch;
 }
-export function createGenerate(fetcher: typeof fetch = fetch): Generate {
+export function createGenerate(fetcher: typeof fetch = fetch, clock: Clock = systemClock): Generate {
   return async function* (turn, signal) {
+  const catalogModel = requireModel(turn.provider, turn.model);
+  const inputLimitTokens = catalogModel.contextWindow - catalogModel.maxOutputTokens;
+  if (inputLimitTokens <= 0) throw new Error('The selected model has no verified input budget. Select another model.');
+  const notifyContext = (update: ContextUpdate) => turn.context?.onUpdate(update);
   const credentials = turn.credentials;
   const metadata = credentials.provider === 'codex'
     ? createOpenAiResponsesModel({ modelId: turn.model, apiKey: 'codex-oauth', fetch: codexFetch(credentials.access, credentials.accountId, fetcher), systemPrompt: turn.instructions, sessionId: turn.conversationId })
@@ -58,6 +64,29 @@ export function createGenerate(fetcher: typeof fetch = fetch): Generate {
     tools: modelTools,
     stopWhen: modelTools ? stepCountIs(TOOL_STEP_BUDGET) : undefined,
     providerOptions: providerOptions as Parameters<typeof streamText>[0]['providerOptions'],
+    prepareStep: ({ messages, stepNumber }) => {
+      // prepareStep runs immediately before every provider request, including
+      // the request after a tool result. Read the clock here rather than at
+      // Chat.start so long-running tool loops do not reuse stale context.
+      signal.throwIfAborted();
+      const instructions = withClockContext(turn.instructions || 'Be helpful, clear, and kind.', formatClockContext(clock));
+      const estimate = estimateModelContext(messages, instructions, turn.tools ?? [], turn.context?.imageAccounting);
+      const requestNumber = stepNumber + 1;
+      notifyContext({ type: 'estimate', requestNumber, estimate, contextWindowTokens: catalogModel.contextWindow, outputReserveTokens: catalogModel.maxOutputTokens });
+      if (estimate.totalTokens > inputLimitTokens) throw new ContextBudgetError(estimate.totalTokens, inputLimitTokens, catalogModel.contextWindow, catalogModel.maxOutputTokens, requestNumber);
+      if (metadata.useProviderInstructions) {
+        return {
+          providerOptions: {
+            ...providerOptions,
+            openai: { ...providerOptions.openai, instructions },
+          } as Parameters<typeof streamText>[0]['providerOptions'],
+        };
+      }
+      return { system: instructions };
+    },
+    onStepFinish: ({ stepNumber, usage }) => {
+      notifyContext({ type: 'provider', requestNumber: stepNumber + 1, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens });
+    },
     abortSignal: signal,
     maxRetries: 0,
     // No temperature/max-output keys: Codex rejects some shared parameters.

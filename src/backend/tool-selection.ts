@@ -16,11 +16,17 @@ export function descriptorBatches(tools: readonly AgentToolDef[]): ToolDescripto
   return batches;
 }
 
-function validScore(value: ToolScore): boolean {
+export function validScore(value: ToolScore): boolean {
   return Number.isFinite(value.score) && value.score >= 0 && value.score <= 3
     && Array.isArray(value.probabilities) && value.probabilities.length === 4
     && value.probabilities.every(p => Number.isFinite(p) && p >= 0 && p <= 1)
     && Math.abs(value.probabilities.reduce((sum, p) => sum + p, 0) - 1) <= 0.02;
+}
+
+/** Minimum-level acceptance uses summed probabilities, never the mean score. */
+export function scoreAtOrAbove(value: ToolScore, minimumLevel: number): boolean {
+  if (!Number.isSafeInteger(minimumLevel) || minimumLevel < 0 || minimumLevel > 3 || !validScore(value)) return false;
+  return value.probabilities.slice(minimumLevel).reduce((sum, probability) => sum + probability, 0) >= 0.7;
 }
 
 /** Character guard, not a tokenizer or a guarantee about provider context size. */
@@ -64,7 +70,7 @@ export function selectedToolbag(
   ] : [];
   if (serializedSize(meta) > schemaChars) throw new Error('Tool budget cannot fit discovery tools');
   const direct: AgentToolDef[] = [];
-  const ranked = [...scores].filter(score => score.probabilities[2] + score.probabilities[3] + 1e-12 >= 0.7)
+  const ranked = [...scores].filter(score => scoreAtOrAbove(score, 2))
     .sort((a, b) => b.score - a.score || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const score of ranked) {
     if (direct.length >= maxDirect) break;

@@ -38,6 +38,13 @@ const api: DesktopAPI = {
   request: (request) => ipcRenderer.invoke('moki:request', request),
   openSettings: () => ipcRenderer.invoke('moki:settings'),
   openHistory: () => ipcRenderer.invoke('moki:history'),
+  openLearningReview: (runId) => ipcRenderer.invoke('moki:open-learning-review', runId),
+  readLearningReview: () => ipcRenderer.invoke('moki:read-learning-review'),
+  onLearningReview: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value);
+    ipcRenderer.on('moki:learning-review', handler);
+    return () => ipcRenderer.removeListener('moki:learning-review', handler);
+  },
   copyText: (text) => ipcRenderer.invoke('moki:copy-text', text),
   openWebLink: (url) => ipcRenderer.invoke('moki:open-web-link', url),
   startCapture: () => ipcRenderer.invoke('moki:start-capture'),

@@ -7,6 +7,7 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import * as readline from 'node:readline';
 import * as nodeCrypto from 'node:crypto';
+import { Store } from '@backend/store';
 
 test('preload strips Electron events and removes subscriptions', () => {
   const ipc = Object.assign(new EventEmitter(), { invoke: async (channel: string) => channel });
@@ -112,10 +113,12 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(windows[0].webContents.devTools).toBe(development ? 1 : 0);
     expect(() => handlers.get('moki:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
     expect(() => handlers.get('moki:tool-loading')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
-    await expect(request(event(windows[0]), { method: 'cuaTools' })).rejects.toThrow('only available in Settings');
-    await expect(handlers.get('moki:auth')!(event(windows[0]), { action: 'signIn', server: 'webby' })).rejects.toThrow('only available in Settings');
-    await expect(request(event(windows[0]), { method: 'cuaSetTool', tool: 'click', disabled: true })).rejects.toThrow('only available in Settings');
-    await expect(request(event(windows[0]), { method: 'cuaSetEnabled', enabled: false })).rejects.toThrow('only available in Settings');
+     await expect(request(event(windows[0]), { method: 'cuaTools' })).rejects.toThrow('only available in Settings');
+     await expect(request(event(windows[0]), { method: 'learningRuns' })).rejects.toThrow('only available in Settings');
+     await expect(request(event(windows[0]), { method: 'learningRetry', runId: 'run' })).rejects.toThrow('only available in Settings');
+     await expect(handlers.get('moki:auth')!(event(windows[0]), { action: 'signIn', server: 'webby' })).rejects.toThrow('only available in Settings');
+     await expect(request(event(windows[0]), { method: 'cuaSetTool', tool: 'click', disabled: true })).rejects.toThrow('only available in Settings');
+     await expect(request(event(windows[0]), { method: 'cuaSetEnabled', enabled: false })).rejects.toThrow('only available in Settings');
     await open(event(windows[0]));
     expect(windows).toHaveLength(2);
     await open(event(windows[0]));
@@ -137,6 +140,11 @@ test.each([{ development: false, packaged: false }, { development: true, package
       await expect(request(event(w), { method: 'snapshot' })).rejects.toThrow('Untrusted request');
       w.webContents.mainFrame.url = trusted;
     }
+    const sentBeforeReads = windows.map(w => w.webContents.sent.length);
+    for (const method of ['learningSettings', 'learningHistory', 'learningRuns', 'learningRunDetail', 'memorySettings', 'memoryList', 'memoryRead']) {
+      await request(event(windows[1]), { method, runId: 'test', memoryId: 'test' });
+    }
+    expect(windows.map(w => w.webContents.sent.length)).toEqual(sentBeforeReads);
     const result = await request(event(windows[1]), { method: 'snapshot' });
     expect(result.revision).toBe(1);
     expect((await request(event(windows[1]), { method: 'cuaTools' })).revision).toBe(1);
@@ -155,6 +163,24 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(menu[0].submenu.some((item: any) => item.accelerator === 'CmdOrCtrl+,')).toBe(true);
     child.stdout.write(JSON.stringify({ event: 'state', result: { ...result, revision: 2 } }) + '\n');
     expect(windows[0].webContents.sent.at(-1).result.revision).toBe(2);
+    const runId = '00000000-0000-4000-8000-000000000001';
+    const openReview = handlers.get('moki:open-learning-review')!;
+    await expect(openReview(event(windows[0]), runId)).rejects.toThrow('Settings only');
+    await openReview(event(windows[1]), runId);
+    const review = windows.at(-1)!;
+    expect(review.webContents.mainFrame.url).toEndWith('#learning-review');
+    await openReview(event(windows[1]), runId);
+    expect(windows).toHaveLength(4);
+    await expect(request(event(review), { method: 'createConversation' })).rejects.toThrow('read-only');
+    await expect(handlers.get('moki:chat')!(event(review), {})).rejects.toThrow('read-only');
+    await expect(handlers.get('moki:read-learning-review')!(event(windows[0]))).rejects.toThrow('Not a learning review');
+    const chatEvents = windows[0].webContents.sent.length;
+    child.stdout.write(JSON.stringify({ event: 'state', result: { learningLiveOutput: { runId, text: 'partial review' } } }) + '\n');
+    expect(windows[0].webContents.sent.length).toBe(chatEvents);
+    expect(review.webContents.sent.at(-1)).toEqual({ channel: 'moki:learning-review', result: { output: { runId, text: 'partial review' } } });
+    expect((await handlers.get('moki:read-learning-review')!(event(review))).output.text).toBe('partial review');
+    child.stdout.write(JSON.stringify({ event: 'state', result: { learningLiveCleared: true } }) + '\n');
+    expect((await handlers.get('moki:read-learning-review')!(event(review))).output).toBeUndefined();
     child.emit('exit');
     expect(windows[0].webContents.sent.at(-1).channel).toBe('moki:runtime-error');
     child.stdout.write(JSON.stringify({ event: 'state', result }) + '\n');
@@ -162,4 +188,17 @@ test.each([{ development: false, packaged: false }, { development: true, package
   } finally {
     child.emit('exit'); child.stdout.end(); child.stderr.end(); child.stdin.end();
   }
+});
+
+test('initial Moki instructions preserve the complete text through Settings save', async () => {
+  const store = new Store(':memory:');
+  try {
+    const assistant = store.snapshot().assistants.find((item) => item.id === 'moki')!;
+    const instructions = 'instruction '.repeat(1300).slice(0, 15_999);
+    const result = store.handle({ method: 'saveAssistant', assistant: { ...assistant, instructions } });
+    expect(result.snapshot.assistants.find((item) => item.id === 'moki')?.instructions).toBe(instructions);
+    const source = await Bun.file('src/renderer/windows/settings-window.tsx').text();
+    expect(source).toContain('value={draft.instructions}');
+    expect(source).not.toContain('draft.instructions.slice');
+  } finally { store.close(); }
 });

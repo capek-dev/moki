@@ -1,0 +1,50 @@
+[
+  {
+    "id": "positive-indirect-trip",
+    "request": "Find a hotel in Lisbon for the trip.",
+    "recent": "",
+    "selectedDescriptors": ["Lisbon trip"],
+    "expected": ["Alex accessibility"],
+    "forbidden": []
+  },
+  {
+    "id": "negative-alex-not-travelling",
+    "request": "Find a hotel in Lisbon for Sam.",
+    "recent": "",
+    "selectedDescriptors": ["Lisbon trip"],
+    "expected": ["Sam hotel preference"],
+    "forbidden": ["Alex accessibility"]
+  },
+  {
+    "id": "topic-switch",
+    "request": "What should I pack for Tokyo?",
+    "recent": "",
+    "selectedDescriptors": ["Tokyo trip"],
+    "expected": ["Tokyo packing"],
+    "forbidden": ["Lisbon packing"]
+  },
+  {
+    "id": "stale-fact",
+    "request": "What does Alex need now?",
+    "recent": "",
+    "selectedDescriptors": ["Alex"],
+    "expected": ["Alex current home"],
+    "forbidden": ["Alex stale home"]
+  },
+  {
+    "id": "contradiction",
+    "request": "What is Alex's seat preference?",
+    "recent": "",
+    "selectedDescriptors": ["Alex"],
+    "expected": [],
+    "forbidden": ["Alex aisle preference", "Alex window preference"]
+  },
+  {
+    "id": "implicit-follow-up",
+    "request": "What should I check before booking?",
+    "recent": "user: We are planning the Lisbon trip with Alex.",
+    "selectedDescriptors": ["Lisbon trip"],
+    "expected": ["Alex accessibility"],
+    "forbidden": ["Tokyo packing"]
+  }
+]

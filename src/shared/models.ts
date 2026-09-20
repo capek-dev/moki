@@ -2,13 +2,14 @@ import type { Provider } from '@shared/protocol';
 
 // Initial curated catalog from Jean2's provider configuration. Availability is
 // decided by the provider, not inferred from a successful OAuth login.
-// contextWindow values come from Jean2's models.json (deepseek 1M, codex 372k).
-export const MODELS: { id: string; name: string; provider: Provider; imageInput: boolean; contextWindow: number }[] = [
-  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', provider: 'deepseek', imageInput: true, contextWindow: 1000000 },
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'codex', imageInput: true, contextWindow: 372000 },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', provider: 'codex', imageInput: true, contextWindow: 372000 },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', provider: 'codex', imageInput: true, contextWindow: 372000 },
-  { id: 'gpt-6-astra', name: 'GPT-6 Astra', provider: 'codex', imageInput: true, contextWindow: 372000 },
+// contextWindow and maxOutputTokens come from the verified Jean2
+// packages/server/src/config/models.json entries for these model IDs.
+export const MODELS: { id: string; name: string; provider: Provider; imageInput: boolean; contextWindow: number; maxOutputTokens: number }[] = [
+  { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', provider: 'deepseek', imageInput: true, contextWindow: 1000000, maxOutputTokens: 384000 },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', provider: 'codex', imageInput: true, contextWindow: 372000, maxOutputTokens: 128000 },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', provider: 'codex', imageInput: true, contextWindow: 372000, maxOutputTokens: 128000 },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', provider: 'codex', imageInput: true, contextWindow: 372000, maxOutputTokens: 128000 },
+  { id: 'gpt-6-astra', name: 'GPT-6 Astra', provider: 'codex', imageInput: true, contextWindow: 372000, maxOutputTokens: 128000 },
 ];
 export function requireModel(provider: unknown, model: unknown) {
   const found = MODELS.find((item) => item.provider === provider && item.id === model);

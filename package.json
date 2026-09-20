@@ -15,6 +15,7 @@
     "test:foundation": "bun test tests/foundation.test.ts",
     "desktop": "electron .",
     "dev": "bun scripts/dev.ts",
+    "smoke:electron": "bun run scripts/electron-smoke.ts",
     "build:dev": "bun scripts/build.ts --dev",
     "package:dir": "bun run build && electron-builder --dir --publish never"
   },

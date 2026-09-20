@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Assistant, Result, Snapshot } from '@shared/protocol';
 import { ProviderSettings } from '@renderer/components/settings/provider-settings';
 import { ToolLoadingSettings } from '@renderer/components/settings/tool-loading-settings';
+import { MemorySettings } from '@renderer/components/settings/memory-settings';
 import { ConnectionsSettings } from '@renderer/components/settings/connections-settings';
 import { AppearancePreview } from '@renderer/components/settings/appearance-preview';
 import { INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
@@ -15,7 +16,7 @@ import { Panel } from '@renderer/components/ui/panel';
 import { Field, Textarea } from '@renderer/components/ui/field';
 import { SimpleSelect } from '@renderer/components/ui/select';
 
-const SECTIONS = ['Moki', 'Appearance', 'Providers', 'Integrations'] as const;
+const SECTIONS = ['Moki', 'Appearance', 'Providers', 'Memory', 'Integrations'] as const;
 const PROVIDER_LABELS = { deepseek: 'DeepSeek', codex: 'Codex subscription' } as const;
 
 export function Settings() {
@@ -91,6 +92,7 @@ export function Settings() {
         <TonePicker choice={choice} onChoose={choose} />
       </Panel>}
       <div hidden={section !== 'Providers'}><ProviderSettings /><ToolLoadingSettings /></div>
+      {section === 'Memory' && <MemorySettings />}
       {section === 'Integrations' && <div className="grid gap-3">
         <Panel className="grid gap-1.5">
           <h2 className="text-[15px] font-semibold">Integrations</h2>

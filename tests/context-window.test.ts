@@ -50,6 +50,17 @@ test('instructions add system tokens', () => {
   expect(withSystem.systemTokens).toBe(Math.ceil(28 / 4) + 4);
 });
 
+test('aggregate estimate accounts for history, clock, tool guidance, and memory separately', () => {
+  const estimate = estimateContextUsage([message('u1', 'abcd')], [], 'base', 'clock', {
+    toolInstructions: 'tool guidance',
+    memoryContext: 'memory record',
+  });
+  expect(estimate.systemTokens).toBe(Math.ceil(('base'.length + 2 + 'clock'.length) / 4) + 4);
+  expect(estimate.toolTokens).toBe(Math.ceil('tool guidance'.length / 4) + 4);
+  expect(estimate.memoryTokens).toBe(Math.ceil('memory record'.length / 4) + 4);
+  expect(estimate.totalTokens).toBe(estimate.systemTokens + estimate.toolTokens + estimate.memoryTokens + estimate.textTokens + estimate.imageTokens);
+});
+
 test('compact token formatting', () => {
   expect(formatTokens(950)).toBe('950');
   expect(formatTokens(1500)).toBe('1.5k');
@@ -60,7 +71,7 @@ test('compact token formatting', () => {
 test('the chat header wires the ring to the conversation context estimate', async () => {
   const app = await Bun.file('src/renderer/windows/chat-window.tsx').text();
   expect(app).toContain('estimateContextUsage(messages, data?.attachments ?? [], assistant?.instructions ?? \'\')');
-  expect(app).toContain('<ContextRing estimate={contextEstimate} contextWindow={contextModel.contextWindow} modelName={contextModel.name} />');
+  expect(app).toContain('<ContextRing estimate={contextEstimate} lastRequest={lastContextUsage} contextWindow={contextModel.contextWindow} outputReserveTokens={contextModel.maxOutputTokens} modelName={contextModel.name} />');
 });
 
 test('the ring keeps Prokop thresholds and shows no percentage text', async () => {

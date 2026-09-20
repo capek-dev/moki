@@ -6,11 +6,12 @@ import { EncryptedVault, ProviderConnections } from '@electron/provider-connecti
 import { SpeechSynth } from '@electron/speech';
 import { ToolLoadingSettings } from '@electron/tool-loading';
 import { DictationService } from '@electron/dictation-service';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { parseMcpConfig } from '@shared/mcp';
 import { pathToFileURL } from 'node:url';
 import { Runtime } from '@electron/runtime';
+import { LearningReviewCache } from '@electron/learning-review-cache';
 import { requireThinking } from '@shared/models';
 import type { ChatRequest, Request, Result } from '@shared/protocol';
 import { userDataPath } from '@shared/data-paths';
@@ -19,9 +20,12 @@ import { DEV_ORIGIN, isDevelopment } from '@shared/development';
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'moki-attachment', privileges: { secure: true, supportFetchAPI: true } }]);
 const development = isDevelopment(app.isPackaged, process.env.MOKI_DEV);
+const smoke = process.env.MOKI_SMOKE === '1';
 app.setName(development ? 'Moki Dev' : 'Moki');
 try {
-  const dataDir = development ? join(app.getPath('appData'), 'Moki Dev') : userDataPath(app.getPath('appData'));
+  const smokeDataDir = process.env.MOKI_SMOKE_DATA_DIR;
+  if (smoke && (!smokeDataDir || !isAbsolute(smokeDataDir))) throw new Error('MOKI_SMOKE_DATA_DIR must be an absolute path.');
+  const dataDir = smoke ? smokeDataDir! : development ? join(app.getPath('appData'), 'Moki Dev') : userDataPath(app.getPath('appData'));
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   app.setPath('userData', dataDir);
 }
@@ -32,8 +36,27 @@ let settings: BrowserWindow | undefined;
 let history: BrowserWindow | undefined;
 const registered = new Map<BrowserWindow, string>();
 const pendingChats = new Map<string, object>();
+const activeLearning = new Map<string, 'deepseek' | 'codex'>();
+const reviewWindows = new Map<string, BrowserWindow>();
+const reviewCache = new LearningReviewCache();
 function broadcast(result: Result) {
-  for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:state', result);
+  if (result.learningLiveCleared) {
+    reviewCache.forget(activeLearning.keys());
+    for (const target of reviewWindows.values()) if (!target.isDestroyed()) target.webContents.send('moki:learning-review', { refresh: true });
+    return result;
+  }
+  if (result.learningLiveOutput) {
+    const output = reviewCache.receive(result.learningLiveOutput);
+    const target = reviewWindows.get(result.learningLiveOutput.runId);
+    if (output && target && !target.isDestroyed()) target.webContents.send('moki:learning-review', { output });
+    return result;
+  }
+  for (const target of registered.keys()) {
+    if (target.isDestroyed()) continue;
+    if ([...reviewWindows.values()].includes(target)) {
+      if (result.learning || result.memory) target.webContents.send('moki:learning-review', { refresh: true });
+    } else target.webContents.send('moki:state', result);
+  }
   return result;
 }
 let tray: Tray | undefined;
@@ -70,9 +93,11 @@ function secureWindow(target: BrowserWindow, hash = '') {
   target.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   target.on('closed', () => registered.delete(target));
 }
-function assertTrusted(event: Electron.IpcMainInvokeEvent) {
+function assertTrusted(event: Electron.IpcMainInvokeEvent, reviewRead = false) {
   const target = BrowserWindow.fromWebContents(event.sender);
   if (!target || !registered.has(target) || event.senderFrame !== target.webContents.mainFrame || event.senderFrame.url !== registered.get(target)) throw new Error('Untrusted request.');
+  // Review windows have a dedicated read-only IPC surface.
+  if ([...reviewWindows.values()].includes(target) && !reviewRead) throw new Error('Learning review windows are read-only.');
 }
 async function openSettings() {
   if (quitting) return;
@@ -88,6 +113,20 @@ async function openSettings() {
   settings.on('closed', () => { settings = undefined; });
   if (development) await settings.loadURL(DEV_ORIGIN + '/#settings');
   else await settings.loadFile(page, { hash: 'settings' });
+}
+async function openLearningReview(runId: string) {
+  if (quitting) return;
+  if (typeof runId !== 'string' || !/^[0-9a-f-]{36}$/i.test(runId)) throw new Error('Invalid learning run.');
+  await runtime!.request({ method: 'learningRunDetail', runId, limit: 20 });
+  const existing = reviewWindows.get(runId);
+  if (existing && !existing.isDestroyed()) { existing.show(); existing.focus(); return; }
+  if (reviewWindows.size >= 8) throw new Error('Close a review window before opening another.');
+  const target = new BrowserWindow({ width: 760, height: 760, minWidth: 400, minHeight: 400, title: 'Learning review', webPreferences: { preload: join(appRoot, 'dist/electron/preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false }, ...glassWindow });
+  reviewWindows.set(runId, target);
+  secureWindow(target, '#learning-review');
+  target.on('closed', () => reviewWindows.delete(runId));
+  if (development) await target.loadURL(DEV_ORIGIN + '/#learning-review');
+  else await target.loadFile(page, { hash: 'learning-review' });
 }
 async function openHistory() {
   if (quitting) return;
@@ -135,6 +174,21 @@ else {
       : join(appRoot, 'dist/native/moki-dictate');
     runtime = new Runtime(binary, app.getPath('userData'), broadcast, (message) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:runtime-error', message);
+    }, (due) => {
+      void (async () => {
+        try {
+          const credentialRevision = providers!.status().revision;
+          const credentials = await providers!.credentials(due.provider);
+          if (providers!.status().revision !== credentialRevision) throw new Error('Provider credentials changed.');
+          activeLearning.set(due.runId, due.provider);
+          await runtime!.runLearning(due.runId, due.model, credentials, credentialRevision);
+        } catch (error) {
+          try { await runtime!.failLearning(due.runId, error instanceof Error ? error.message : 'Learning provider unavailable.'); } catch (failure) { console.error('[moki] learning failure report failed:', failure instanceof Error ? failure.message : String(failure)); }
+        } finally {
+          activeLearning.delete(due.runId);
+          reviewCache.finish(due.runId);
+        }
+      })();
     });
     await runtime.ready;
     // Sign-ins from previous sessions keep working: push their headers into
@@ -177,6 +231,7 @@ else {
     dictation = new DictationService();
     providers = new ProviderConnections(new EncryptedVault(join(app.getPath('userData'), 'providers.encrypted'), safeStorage), (url) => shell.openExternal(url), (state) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:providers-state', state);
+      for (const [runId] of activeLearning) void runtime?.failLearning(runId, 'Provider credentials changed.').catch((error) => console.error('[moki] learning credential-change cancellation failed:', error instanceof Error ? error.message : String(error)));
     });
     const toolLoading = new ToolLoadingSettings(join(app.getPath('userData'), 'tool-loading.encrypted'), safeStorage);
     ipcMain.handle('moki:tool-loading', (event, command: unknown) => {
@@ -245,14 +300,31 @@ else {
       assertTrusted(event);
       dictation!.stop();
     });
+    ipcMain.handle('moki:open-learning-review', async (event, runId: string) => {
+      assertTrusted(event);
+      if (event.sender !== settings?.webContents) throw new Error('Learning reviews open from Settings only.');
+      await openLearningReview(runId);
+    });
+    ipcMain.handle('moki:read-learning-review', async (event) => {
+      assertTrusted(event, true);
+      const runId = [...reviewWindows].find(([, target]) => target.webContents === event.sender)?.[0];
+      if (!runId) throw new Error('Not a learning review window.');
+      const result = await runtime!.request({ method: 'learningRunDetail', runId, limit: 25 });
+      return { detail: result.learningRunDetail, output: reviewCache.get(runId) };
+    });
     ipcMain.handle('moki:request', async (event, input: unknown) => {
       assertTrusted(event);
       // Explicit ingress allowlist blocks private credential-bearing pipe commands.
-      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat', 'revertMessage', 'cuaTools', 'cuaSetTool', 'cuaSetEnabled', 'mcpTools', 'mcpAddServer', 'mcpRemoveServer', 'mcpSetServer', 'mcpSetTool'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
+      if (!input || typeof input !== 'object' || !['snapshot', 'saveAssistant', 'createConversation', 'selectModel', 'cancelChat', 'revertMessage', 'cuaTools', 'cuaSetTool', 'cuaSetEnabled', 'mcpTools', 'mcpAddServer', 'mcpRemoveServer', 'mcpSetServer', 'mcpSetTool', 'memorySettings', 'memorySetEnabled', 'memorySetPolicy', 'memoryRecallHistory', 'memoryList', 'memoryRead', 'memoryConnections', 'memoryUpdate', 'memoryForget', 'learningSettings', 'learningSetEnabled', 'learningSetPaused', 'learningSetProviderModel', 'learningExcludeConversation', 'learningHistory', 'learningRuns', 'learningRunDetail', 'learningRetry', 'learningCancel', 'learningUndo'].includes(String((input as Request).method))) throw new Error('Unsupported request.');
       const request = input as Request;
       if ((request.method === 'cuaTools' || request.method === 'cuaSetTool' || request.method === 'cuaSetEnabled' || request.method === 'mcpTools' || request.method === 'mcpAddServer' || request.method === 'mcpRemoveServer' || request.method === 'mcpSetServer' || request.method === 'mcpSetTool') && event.sender !== settings?.webContents) throw new Error('Connection settings are only available in Settings.');
+              if ((request.method.startsWith('memory') || request.method.startsWith('learning')) && event.sender !== settings?.webContents) throw new Error('Memory settings are only available in Settings.');
       if (request.method === 'cancelChat') pendingChats.delete(request.conversationId);
-      return broadcast(await runtime!.request(request));
+      const result = await runtime!.request(request);
+      // Queries return to the caller only, never as mutation broadcasts. return to their caller only. Broadcasting them creates a
+      // read -> state event -> refresh -> read loop in Settings subscribers.
+      const readOnly = new Set(['snapshot', 'cuaTools', 'mcpTools', 'memorySettings', 'memoryRecallHistory', 'memoryList', 'memoryRead', 'memoryConnections', 'learningSettings', 'learningHistory', 'learningRuns', 'learningRunDetail']);
+      return readOnly.has(request.method) ? result : broadcast(result);
     });
     ipcMain.handle('moki:chat', async (event, input: ChatRequest) => {
       assertTrusted(event);
@@ -299,6 +371,7 @@ else {
         { role: 'reload' as const },
       ] }] : []),
     ]));
+    if (smoke) window.webContents.once('did-finish-load', () => app.quit());
     if (development) {
       await window.loadURL(DEV_ORIGIN + '/');
       window.webContents.openDevTools({ mode: 'detach' });

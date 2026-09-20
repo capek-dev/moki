@@ -101,6 +101,7 @@ export function App() {
     () => estimateContextUsage(messages, data?.attachments ?? [], assistant?.instructions ?? ''),
     [messages, data?.attachments, assistant?.instructions],
   );
+  const lastContextUsage = conversationId ? state.contextUsage?.[conversationId] : undefined;
   const imageCapable = validModel && assistant ? supportsImageInput(assistant.provider, model) : false;
   const levels = validModel && assistant ? thinkingLevels(assistant.provider, model) : [];
   const thinking = conversation?.thinking ?? null;
@@ -314,7 +315,7 @@ export function App() {
     {/* The Moki label remains draggable; only the action buttons opt out. */}
     <header className="titlebar flex min-h-12 items-center justify-end gap-1 pr-2.5 pb-2">
       <span className="px-2 text-[12.5px] font-medium text-ink-2">Moki</span>
-      {contextModel && <ContextRing estimate={contextEstimate} contextWindow={contextModel.contextWindow} modelName={contextModel.name} />}
+      {contextModel && <ContextRing estimate={contextEstimate} lastRequest={lastContextUsage} contextWindow={contextModel.contextWindow} outputReserveTokens={contextModel.maxOutputTokens} modelName={contextModel.name} />}
       <Button variant="ghost" size="icon-sm" aria-label={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'} title={speakReplies ? 'Mute spoken replies' : 'Speak replies aloud'} aria-pressed={speakReplies} disabled={runtimeFailed} onClick={() => {
         const next = !speakReplies;
         setSpeakReplies(next);

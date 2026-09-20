@@ -3,6 +3,7 @@ import { createGenerate, codexFetch } from '@backend/model-stream';
 import type { Turn } from '@backend/chat';
 
 const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.6-sol', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };
+const fixedClock = { now: () => new Date('2025-01-02T03:04:05.000Z'), timeZone: () => 'UTC' };
 test('published DeepSeek adapter serializes history and streams in an isolated process', async () => {
   const child = Bun.spawn([process.execPath, 'run', 'tests/fixtures/deepseek-stream.ts'], { stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => child.kill(), 10000);
@@ -34,7 +35,9 @@ for (const thinking of [null, 'low', 'medium', 'high', 'xhigh', 'max'] as const)
     expect(headers.get('ChatGPT-Account-Id')).toBe('account');
     expect(init.redirect).toBe('error');
     const body = JSON.parse(String(init.body));
-    expect(body).toMatchObject({ model, stream: true, store: false, instructions: 'Be kind.' });
+    expect(body).toMatchObject({ model, stream: true, store: false });
+    expect(body.instructions).toContain('Be kind.');
+    expect(body.instructions).toContain('Current date/time: 2025-01-02T03:04:05; timezone: UTC; UTC: 2025-01-02T03:04:05.000Z.');
     if (thinking) expect(body.reasoning).toEqual({ effort: thinking });
     else expect(body.reasoning).toBeUndefined();
     expect(body.input.map((item: { role: string }) => item.role)).toEqual(['user', 'assistant', 'user']);
@@ -47,7 +50,7 @@ for (const thinking of [null, 'low', 'medium', 'high', 'xhigh', 'max'] as const)
       { type: 'response.output_item.done', output_index: 0, item: { type: 'message', id: 'msg_1', role: 'assistant', content: [{ type: 'output_text', text: 'Hello again', annotations: [] }] } },
       { type: 'response.completed', response: { id: 'resp_1', status: 'completed', incomplete_details: null, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } },
     ]), { headers: { 'Content-Type': 'text/event-stream' } });
-  }) as unknown as typeof fetch);
+  }) as unknown as typeof fetch, fixedClock);
   let output = '';
   for await (const text of generate({ ...turn, model, thinking }, new AbortController().signal)) output += text;
   expect(output).toBe('Hello again');

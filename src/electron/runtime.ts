@@ -9,7 +9,7 @@ export class Runtime {
   private stopped = false;
   private closing?: Promise<void>;
   readonly ready: Promise<void>;
-  constructor(executable: string, dataDir: string, private changed: (result: Result) => void = () => {}, private failed: (message: string) => void = () => {}) {
+  constructor(executable: string, dataDir: string, private changed: (result: Result) => void = () => {}, private failed: (message: string) => void = () => {}, private learningDue: (due: { runId: string; provider: 'deepseek' | 'codex'; model: string }) => void = () => {}) {
     this.child = spawn(executable, [], {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -38,8 +38,9 @@ export class Runtime {
             if (response.bun !== '1.4.0' || !response.capekExports) throw new Error('Runtime compatibility check failed.');
             clearTimeout(timer); resolve(); return;
           }
-          if (response.event === 'state') { this.changed(response.result); return; }
-          const item = this.pending.get(response.id);
+           if (response.event === 'state') { this.changed(response.result); return; }
+           if (response.event === 'learning-due' && typeof response.runId === 'string' && (response.provider === 'deepseek' || response.provider === 'codex') && typeof response.model === 'string') { this.learningDue({ runId: response.runId, provider: response.provider, model: response.model }); return; }
+           const item = this.pending.get(response.id);
           if (!item) return;
           this.pending.delete(response.id); clearTimeout(item.timer);
           if (response.error) item.reject(new Error(response.error));
@@ -53,9 +54,15 @@ export class Runtime {
     createInterface({ input: this.child.stderr }).on('line', (line) => { if (line.trim()) process.stderr.write(line + '\n'); });
   }
   startChat(request: ChatRequest, credentials: Credentials, toolLoading?: import('@shared/tool-loading').ToolLoadingConfig): Promise<Result> {
-    return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials, toolLoading });
+    return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials, toolLoading, memoryJevKey: toolLoading?.key });
   }
   request(request: Request): Promise<Result> { return this.send(request); }
+  runLearning(runId: string, model: string, credentials: Credentials, credentialRevision: number): Promise<Result> {
+    return this.send({ method: 'learningRun', runId, model, credentials, credentialRevision });
+  }
+  failLearning(runId: string, error: string): Promise<Result> {
+    return this.send({ method: 'learningFail', runId, error: error.slice(0, 240) });
+  }
   // Fire-and-forget event push to the backend (no id, no response expected).
   async push(event: Record<string, unknown>): Promise<void> {
     await this.ready;
