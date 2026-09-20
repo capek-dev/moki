@@ -32,14 +32,7 @@ export function scoreAtOrAbove(value: ToolScore, minimumLevel: number): boolean 
 /** Character guard, not a tokenizer or a guarantee about provider context size. */
 function serializedSize(tools: readonly AgentToolDef[]): number { return JSON.stringify(tools).length; }
 
-function unusedName(base: string, names: Set<string>): string {
-  let result = base;
-  for (let suffix = 1; names.has(result); suffix++) result = `${base}_moki_${suffix}`;
-  names.add(result);
-  return result;
-}
-
-/** Assemble selected schemas and retain all eligible tools for discovery. */
+/** Keep provider tools stable while exposing selected schemas as hidden turn context. */
 export function selectedToolbag(
   bags: readonly Toolbag[], scores: readonly ToolScore[],
   options: { maxDirect?: number; schemaChars?: number } = {},
@@ -61,13 +54,14 @@ export function selectedToolbag(
     if (!score || !byName.has(score.name) || seen.has(score.name) || !validScore(score)) throw new Error('Invalid tool scores');
     seen.add(score.name);
   }
-  const names = new Set(routing.keys());
-  const searchName = unusedName('search_tools', names);
-  const callName = unusedName('call_tool', names);
-  const meta: AgentToolDef[] = catalog.length ? [
-    { name: searchName, description: `Search other available tools by keyword. Returns complete input schemas. Run matches with ${callName}.`, inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
+  // These names are reserved provider-facing routers. External catalog tools
+  // with the same names remain reachable through call_tool by exact name.
+  const searchName = 'search_tools';
+  const callName = 'call_tool';
+  const meta: AgentToolDef[] = [
+    { name: searchName, description: `Search available tools by keyword. Returns complete input schemas. Run matches with ${callName}.`, inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
     { name: callName, description: 'Run an available tool using its exact name and arguments.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object' } }, required: ['name'] } },
-  ] : [];
+  ];
   if (serializedSize(meta) > schemaChars) throw new Error('Tool budget cannot fit discovery tools');
   const direct: AgentToolDef[] = [];
   const ranked = [...scores].filter(score => scoreAtOrAbove(score, 2))
@@ -77,11 +71,12 @@ export function selectedToolbag(
     const tool = byName.get(score.name)!;
     if (serializedSize([...direct, tool, ...meta]) <= schemaChars) direct.push(tool);
   }
-  const directNames = new Set(direct.map(tool => tool.name));
-  const pool = catalog.filter(tool => !directNames.has(tool.name));
+  const selectedNames = new Set(direct.map(tool => tool.name));
+  const pool = catalog.filter(tool => !selectedNames.has(tool.name));
   let closed = false;
   return {
-    tools: [...direct, ...meta],
+    tools: meta,
+    selectedTools: direct,
     weights: bags.flatMap(bag => bag.weights ?? []),
     execute: async (name, args) => {
       if (closed) throw new Error('Tool selection is closed');
@@ -108,9 +103,7 @@ export function selectedToolbag(
         if (!owner) return { text: 'Unknown tool. Search for an available tool first.', isError: true };
         return owner.execute(input!.name as string, input?.arguments ?? {});
       }
-      const owner = routing.get(name);
-      if (!owner || !directNames.has(name)) throw new Error('Unknown direct tool');
-      return owner.execute(name, args);
+      throw new Error('Unknown routing tool');
     },
     close: () => { if (closed) return; closed = true; for (const bag of new Set(bags)) bag.close(); },
   };

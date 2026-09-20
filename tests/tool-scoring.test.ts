@@ -39,7 +39,8 @@ test('all 320 tools are scored exactly once in bounded requests; pick cap and se
   expect(new Set(seen)).toEqual(new Set(source(320).tools.map(tool => tool.name)));
   expect(diagnostic.catalog).toBe(320); expect(diagnostic.candidates).toBe(320);
   expect(diagnostic.outcome).toBe('selected'); expect(diagnostic.picked).toHaveLength(12);
-  expect(bag.tools).toHaveLength(14); expect(diagnostic.searchable).toBe(308);
+  expect(bag.tools.map(tool => tool.name)).toEqual(['search_tools', 'call_tool']);
+  expect(bag.selectedTools).toHaveLength(12); expect(diagnostic.searchable).toBe(308);
   expect(JSON.stringify(diagnostic)).not.toContain('private-test-key');
   expect(JSON.parse((await bag.execute('search_tools', { query: '319' })).text).tools[0].name).toBe('app__email_319');
   expect((await bag.execute('call_tool', { name: 'app__email_319' })).text).toBe('app__email_319');
@@ -62,7 +63,8 @@ test('Jev can preload a non-keyword match beyond the old 64-tool cutoff', async 
   expect(diagnostic.catalog).toBe(70); expect(diagnostic.candidates).toBe(70);
   expect(diagnostic.outcome).toBe('selected');
   expect(diagnostic.picked).toEqual(['zzz__retrieve']);
-  expect(bag.tools[0].name).toBe('zzz__retrieve');
+  expect(bag.tools.map(tool => tool.name)).toEqual(['search_tools', 'call_tool']);
+  expect(bag.selectedTools?.[0].name).toBe('zzz__retrieve');
 });
 
 test('malformed responses discard Jev scores and use local fallback', async () => {
@@ -72,7 +74,8 @@ test('malformed responses discard Jev scores and use local fallback', async () =
       fetch: async () => Response.json({ answers }), diagnostic: data => { outcome = (data as any).outcome; },
     });
     expect(outcome).toBe('failed_fallback'); expect(bag.tools[0].name).toBe('search_tools');
-    expect(bag.tools[0].description).toContain('app__email_0');
+    expect(bag.selectedTools).toEqual([]);
+    expect(JSON.stringify(bag.tools)).not.toContain('app__email_0');
   }
 });
 
@@ -150,7 +153,10 @@ test('chat passes compact evidence and config, executes a selected tool without 
   const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
   let done!: () => void; const finished = new Promise<void>(resolve => { done = resolve; });
   const events: unknown[] = [];
-  const chat = new Chat(store, async function* (turn) { yield await turn.tools![0].execute({}); }, result => {
+  const chat = new Chat(store, async function* (turn) {
+    const call = turn.tools!.find(tool => tool.name === 'call_tool')!;
+    yield await call.execute({ name: 'app__email_0', arguments: {} });
+  }, result => {
     events.push(result); if (result.snapshot.messages.at(-1)?.status !== 'streaming') done();
   }, async (signal, evidence, policy) => {
     expect(evidence.request).toBe('email'); expect(evidence.recent).toBe('');

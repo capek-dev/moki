@@ -176,11 +176,19 @@ export class Store {
   messages(id: string): Message[] {
     return this.db.query<MessageRow, [string]>('SELECT * FROM (SELECT rowid AS sequence, * FROM messages WHERE conversationId = ? ORDER BY rowid DESC LIMIT 100) ORDER BY sequence').all(id).map(decodeMessage);
   }
+  /** Complete ordered history for model requests. UI snapshots remain bounded. */
+  modelMessages(id: string): Message[] {
+    return this.db.query<MessageRow, [string]>('SELECT rowid AS sequence, * FROM messages WHERE conversationId = ? ORDER BY rowid').all(text(id, 100)).map(decodeMessage);
+  }
   modelContextsFor(messages: readonly Message[]): Map<string, string> {
-    if (!messages.length) return new Map();
-    const placeholders = messages.map(() => '?').join(',');
-    const rows = this.db.query<{ messageId: string; context: string }, string[]>(`SELECT messageId, context FROM message_model_context WHERE messageId IN (${placeholders})`).all(...messages.map((message) => message.id));
-    return new Map(rows.map((row) => [row.messageId, row.context]));
+    const result = new Map<string, string>();
+    for (let start = 0; start < messages.length; start += 500) {
+      const ids = messages.slice(start, start + 500).map((message) => message.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const rows = this.db.query<{ messageId: string; context: string }, string[]>(`SELECT messageId, context FROM message_model_context WHERE messageId IN (${placeholders})`).all(...ids);
+      for (const row of rows) result.set(row.messageId, row.context);
+    }
+    return result;
   }
   setMessageModelContext(messageId: string, context: string, memories: readonly { memoryId: string; revision: number }[] = []): void {
     const id = text(messageId, 100);
@@ -218,9 +226,13 @@ export class Store {
     return row;
   }
   attachmentsFor(messages: readonly Message[]): Attachment[] {
-    if (!messages.length) return [];
-    const placeholders = messages.map(() => '?').join(',');
-    return this.db.query<Attachment, string[]>(`SELECT id, messageId, mime, byteSize, width, height FROM attachments WHERE messageId IN (${placeholders}) ORDER BY rowid`).all(...messages.map((message) => message.id));
+    const result: Attachment[] = [];
+    for (let start = 0; start < messages.length; start += 500) {
+      const ids = messages.slice(start, start + 500).map((message) => message.id);
+      const placeholders = ids.map(() => '?').join(',');
+      result.push(...this.db.query<Attachment, string[]>(`SELECT id, messageId, mime, byteSize, width, height FROM attachments WHERE messageId IN (${placeholders}) ORDER BY rowid`).all(...ids));
+    }
+    return result;
   }
   memorySettings(): MemorySettingsState {
     const row = this.db.query<{ enabled: number; recall: 'basic' | 'jev'; jevConsent: number; jevModel: string; revision: number }, []>('SELECT enabled, recall, jevConsent, jevModel, revision FROM memory_settings WHERE id = 0').get();

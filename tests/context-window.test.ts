@@ -15,13 +15,13 @@ test('image token estimate follows area heuristic with clamps', () => {
   expect(estimateImageTokens(8000, 6000)).toBe(4000); // huge clamps down
 });
 
-test('estimation mirrors the history bounds: newest first, 60k text cap', () => {
+test('estimation includes all supplied history text beyond 60k characters', () => {
   const big = 'x'.repeat(40000);
-  const messages = [message('1', big), message('2', big)]; // 80k total -> only newest fits
+  const messages = [message('1', big), message('2', big)];
   const estimate = estimateContextUsage(messages, [], '');
-  expect(estimate.includedMessages).toBe(1);
-  expect(estimate.truncated).toBe(true);
-  expect(estimate.textTokens).toBe(40000 / 4 + 4);
+  expect(estimate.includedMessages).toBe(2);
+  expect(estimate.truncated).toBe(false);
+  expect(estimate.textTokens).toBe(2 * (40000 / 4 + 4));
 });
 
 test('streaming and incomplete assistant messages are excluded, older text is counted', () => {

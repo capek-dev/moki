@@ -142,7 +142,8 @@ test('browser extension wins duplicate tool names before Cua', async () => {
     close() {},
   });
   const selected = selectedToolbag([makeBag('extension'), makeBag('cua')], [{ name: BROWSER_NAVIGATE, score: 3, probabilities: [0, 0, 0, 1] }]);
-  expect(await selected.execute(BROWSER_NAVIGATE, {})).toEqual({ text: 'extension', isError: false });
+  expect(selected.selectedTools?.map(tool => tool.name)).toEqual([BROWSER_NAVIGATE]);
+  expect(await selected.execute('call_tool', { name: BROWSER_NAVIGATE, arguments: {} })).toEqual({ text: 'extension', isError: false });
   expect(calls).toEqual(['extension']);
   const source = await Bun.file('src/backend/index.ts').text();
   expect(source).toContain('[() => browserExtension.toolbag(signal), () => cua.toolbag(signal), () => mcp.toolbag(signal)]');

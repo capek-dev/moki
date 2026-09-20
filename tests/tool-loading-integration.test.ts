@@ -30,16 +30,22 @@ test('saved key survives reopen and drives per-turn selection with actual termin
   let requests = 0;
   let closed = 0;
   const executed: string[] = [];
+  const nativeToolNames: string[][] = [];
+  const nativeToolPayloads: string[] = [];
+  const modelMessages: string[][] = [];
   let finished!: () => void;
   const bag: Toolbag = {
     tools: ['email__find', 'drive__upload', 'calendar__list'].map(name => ({ name, description: name, inputSchema: { type: 'object' } })),
-    execute: async name => { executed.push(name); return { text: name, isError: false }; },
+    execute: async name => { executed.push(name); return { text: 'ok', isError: false }; },
     close: () => { closed++; },
   };
   const chat = new Chat(store, async function* (turn) {
     const expected = requests === 1 ? 'email__find' : 'drive__upload';
-    expect(turn.tools!.map(tool => tool.name)).toEqual(['call_tool', expected, 'search_tools']);
-    yield await turn.tools!.find((tool) => tool.name === expected)!.execute({});
+    nativeToolNames.push(turn.tools!.map(tool => tool.name));
+    nativeToolPayloads.push(JSON.stringify(turn.tools));
+    modelMessages.push(turn.messages.filter(message => message.role === 'user').map(message => String(message.content)));
+    const call = turn.tools!.find((tool) => tool.name === 'call_tool')!;
+    yield await call.execute({ name: expected, arguments: {} });
   }, result => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finished(); },
   (signal, evidence, policy) => smartToolbag([bag], evidence, policy!, signal, {
     fetch: async (_url, init) => {
@@ -66,6 +72,16 @@ test('saved key survives reopen and drives per-turn selection with actual termin
       await done;
     }
     expect(requests).toBe(2);
+    expect(nativeToolNames).toEqual([['call_tool', 'search_tools'], ['call_tool', 'search_tools']]);
+    expect(nativeToolPayloads[1]).toBe(nativeToolPayloads[0]);
+    expect(nativeToolPayloads[0]).not.toContain('email__find');
+    expect(nativeToolPayloads[1]).not.toContain('drive__upload');
+    expect(modelMessages[0][0]).toContain('email__find');
+    expect(modelMessages[0][0]).not.toContain('drive__upload');
+    expect(modelMessages[1][0]).toBe(modelMessages[0][0]);
+    expect(modelMessages[1][1]).toContain('drive__upload');
+    expect(JSON.stringify(store.snapshot(id))).not.toContain('selected_tool_context');
+    expect(store.messages(id).filter(message => message.role === 'user').map(message => message.text)).toEqual(['Find the email', 'Upload to Drive']);
     expect(executed).toEqual(['email__find', 'drive__upload']);
     expect(closed).toBe(2);
     const diagnostics = lines.filter(line => line.startsWith('[moki] tool-selection ')).map(line => JSON.parse(line.slice('[moki] tool-selection '.length)));

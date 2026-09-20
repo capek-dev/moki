@@ -326,18 +326,36 @@ test('image history limits omit old images without dropping their message text',
   expect(read).toEqual(['attachment-4', 'attachment-3', 'attachment-2', 'attachment-1']);
   expect(replay[0]).toEqual({ role: 'user', content: 'Text 0' });
 });
-test('history reads are bounded and cross-window stale responses cannot replace live text', () => {
-  const f = setup(async function* () { yield 'ok'; });
+test('UI history stays bounded while model requests keep the complete append-only conversation', async () => {
+  let received: Turn | undefined;
+  const f = setup(async function* (turn) { received = turn; yield 'ok'; });
   try {
     for (let i = 0; i < 105; i++) f.store.handle({ method: 'saveMessage', conversationId: f.id, text: `Note ${i}` });
     expect(f.store.messages(f.id)).toHaveLength(100);
+    expect(f.store.modelMessages(f.id)).toHaveLength(105);
+    expect(f.store.modelMessages(f.id)[0].text).toBe('Note 0');
     const base = { snapshot: f.store.snapshot(f.id), conversationId: f.id, revision: 5 };
     let state = applyResult({ revision: 0, histories: {} }, base);
     state = applyResult(state, { ...base, revision: 4, snapshot: { ...base.snapshot, messages: [] } });
     expect(state.data?.messages).toHaveLength(100);
     state = applyResult(state, { revision: 6, snapshot: { ...base.snapshot, messages: [] } });
     expect(state.data?.messages).toHaveLength(100);
+    f.send();
+    await f.done;
+    expect(received?.messages).toHaveLength(106);
+    expect(received?.messages[0].content).toBe('Note 0');
   } finally { f.close(); }
+});
+
+test('model history does not silently drop text after 60,000 characters', () => {
+  const messages: Message[] = [
+    { id: 'old', conversationId: 'conversation', text: 'a'.repeat(40_000), role: 'user', status: 'complete', model: null, assistantName: null, error: null, thinking: null },
+    { id: 'new', conversationId: 'conversation', text: 'b'.repeat(40_000), role: 'user', status: 'complete', model: null, assistantName: null, error: null, thinking: null },
+  ];
+  const replay = history(messages);
+  expect(replay).toHaveLength(2);
+  expect(replay[0].content).toBe(messages[0].text);
+  expect(replay[1].content).toBe(messages[1].text);
 });
 
 test('enabled basic recall is assembled per turn and never saved into assistant instructions', async () => {

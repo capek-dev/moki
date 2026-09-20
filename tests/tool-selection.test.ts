@@ -30,40 +30,49 @@ test('320 descriptors contain short prose only, at most 16 per batch', () => {
 test('probability qualifies mean 1.7, stable ties and no filling rejected slots', () => {
   const { bag } = source([tool('b'), tool('a'), tool('c')]);
   const selected = selectedToolbag([bag], [score('b'), score('a'), { name: 'c', score: 1, probabilities: [0, 1, 0, 0] }]);
-  expect(selected.tools.map(t => t.name)).toEqual(['a', 'b', 'search_tools', 'call_tool']);
-  expect(selectedToolbag([bag], [score('a'), score('b')], { maxDirect: 1 }).tools.map(t => t.name)).toEqual(['a', 'search_tools', 'call_tool']);
+  expect(selected.tools.map(t => t.name)).toEqual(['search_tools', 'call_tool']);
+  expect(selected.selectedTools?.map(t => t.name)).toEqual(['a', 'b']);
+  expect(selectedToolbag([bag], [score('a'), score('b')], { maxDirect: 1 }).selectedTools?.map(t => t.name)).toEqual(['a']);
 });
 
 test('unscored tools stay searchable and X=0 preserves indirect execution', async () => {
   const { bag, calls } = source([tool('email'), tool('drive')]);
   const selected = selectedToolbag([bag], [score('email')], { maxDirect: 0 });
   expect(selected.tools).toHaveLength(2);
+  expect(selected.selectedTools).toEqual([]);
   expect(JSON.parse((await selected.execute('search_tools', { query: 'drive' })).text).tools[0].name).toBe('drive');
   await selected.execute('call_tool', { name: 'drive', arguments: { path: 'x' } });
   expect(calls).toEqual([{ name: 'drive', args: { path: 'x' } }]);
   expect((await selected.execute('call_tool', { name: 'disabled' })).isError).toBe(true);
 });
 
-test('direct and indirect routing share owner; metadata cannot recurse', async () => {
-  const { bag, calls, closes } = source([tool('email'), tool('search_tools'), tool('search_tools_moki_1'), tool('call_tool')]);
+test('reserved routers stay fixed while colliding catalog tools remain indirectly callable', async () => {
+  const { bag, calls, closes } = source([tool('email'), tool('search_tools'), tool('call_tool')]);
   const selected = selectedToolbag([bag], [score('email')]);
-  expect(selected.tools.map(t => t.name)).toEqual(['email', 'search_tools_moki_2', 'call_tool_moki_1']);
-  await selected.execute('email', { id: 1 });
-  await selected.execute('call_tool_moki_1', { name: 'email', arguments: { id: 2 } });
-  expect(calls).toHaveLength(2);
-  expect((await selected.execute('call_tool_moki_1', { name: 'call_tool_moki_1' })).isError).toBe(true);
+  expect(selected.tools.map(t => t.name)).toEqual(['search_tools', 'call_tool']);
+  expect(selected.selectedTools?.map(t => t.name)).toEqual(['email']);
+  await expect(selected.execute('email', { id: 1 })).rejects.toThrow('Unknown routing tool');
+  await selected.execute('call_tool', { name: 'email', arguments: { id: 2 } });
+  await selected.execute('call_tool', { name: 'search_tools', arguments: { external: true } });
+  await selected.execute('call_tool', { name: 'call_tool', arguments: { external: true } });
+  expect(calls).toEqual([
+    { name: 'email', args: { id: 2 } },
+    { name: 'search_tools', args: { external: true } },
+    { name: 'call_tool', args: { external: true } },
+  ]);
   selected.close(); selected.close();
   expect(closes()).toBe(1);
-  await expect(selected.execute('email', {})).rejects.toThrow('closed');
+  await expect(selected.execute('call_tool', {})).rejects.toThrow('closed');
 });
 
 test('exact serialized budget includes helpers and skips oversized ranked tools', () => {
   const { bag } = source([tool('large', 'x'.repeat(30000)), tool('small')]);
   const selected = selectedToolbag([bag], [score('large'), score('small')]);
-  expect(selected.tools.map(t => t.name)).toEqual(['small', 'search_tools', 'call_tool']);
-  const exact = JSON.stringify(selected.tools).length;
-  expect(selectedToolbag([bag], [score('small')], { schemaChars: exact }).tools).toHaveLength(3);
-  expect(selectedToolbag([bag], [score('small')], { schemaChars: exact - 1 }).tools).toHaveLength(2);
+  expect(selected.tools.map(t => t.name)).toEqual(['search_tools', 'call_tool']);
+  expect(selected.selectedTools?.map(t => t.name)).toEqual(['small']);
+  const exact = JSON.stringify([...(selected.selectedTools ?? []), ...selected.tools]).length;
+  expect(selectedToolbag([bag], [score('small')], { schemaChars: exact }).selectedTools).toHaveLength(1);
+  expect(selectedToolbag([bag], [score('small')], { schemaChars: exact - 1 }).selectedTools).toHaveLength(0);
 });
 
 test('invalid policies, probabilities and score identities fail closed', () => {

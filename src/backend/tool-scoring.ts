@@ -148,10 +148,9 @@ export async function smartToolbag(bags: Toolbag[], input: SelectionEvidence, co
   }
   signal.throwIfAborted();
   const bag = outcome === 'selected' ? selectedToolbag(bags, scores, { maxDirect: config.maxDirect }) : namesOnlyToolbag(bags);
-  const names = new Set(tools.map(tool => tool.name));
-  const picked = bag.tools.filter(tool => names.has(tool.name)).map(tool => tool.name);
+  const picked = (bag.selectedTools ?? []).map(tool => tool.name);
   const diagnostic = { outcome, failureReason, model: 'jev-latest', elapsedMs: Date.now() - started, catalog: tools.length, candidates: candidates.length,
-    picked, searchable: tools.length - picked.length, schemaChars: JSON.stringify(bag.tools).length };
+    picked, searchable: tools.length - picked.length, schemaChars: JSON.stringify([...(bag.selectedTools ?? []), ...bag.tools]).length };
   try {
     if (options.diagnostic) options.diagnostic(diagnostic);
     else console.error('[moki] tool-selection ' + JSON.stringify(diagnostic).split(config.key || '\0').join('[REDACTED]'));

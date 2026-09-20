@@ -2,10 +2,8 @@ import type { ModelMessage } from 'ai';
 import type { Attachment, Message } from '@shared/protocol';
 
 // Local context window estimation. The provider reports exact usage only mid-
-// turn, so the header indicator estimates what the next turn will send using
-// the same bounds the backend's history() applies: newest messages first, at
-// most 60k characters of text, at most 4 images and 32MB of image data.
-const TEXT_CHAR_LIMIT = 60000;
+// turn, so the header indicator estimates all supplied message text plus the
+// same image bounds the backend's history() applies: at most 4 images and 32MB.
 const IMAGE_COUNT_LIMIT = 4;
 const IMAGE_BYTES_LIMIT = 32 * 1024 * 1024;
 // JavaScript string lengths are UTF-16 code units. Dividing by four is a
@@ -31,7 +29,7 @@ export interface ContextEstimate {
   totalTokens: number;
   includedMessages: number;
   totalMessages: number;
-  /** True when the 60k text cap or an image cap excluded part of the history. */
+  /** True when an image cap excluded part of the supplied history. Text is never silently truncated. */
   truncated: boolean;
 }
 
@@ -130,7 +128,6 @@ export function estimateImageTokens(width: number, height: number): number {
 export function estimateContextUsage(messages: readonly Message[], attachments: readonly Attachment[], instructions = '', clockContext = '', additions: ContextAdditions = {}): ContextEstimate {
   const byMessage = new Map<string, Attachment[]>();
   for (const attachment of attachments) byMessage.set(attachment.messageId, [...(byMessage.get(attachment.messageId) ?? []), attachment]);
-  let textSize = 0;
   let imageSize = 0;
   let imageCount = 0;
   let textTokens = 0;
@@ -139,8 +136,6 @@ export function estimateContextUsage(messages: readonly Message[], attachments: 
   let truncated = false;
   for (const message of [...messages].reverse()) {
     if (!message.text || message.status === 'streaming' || (message.role === 'assistant' && message.status !== 'complete')) continue;
-    if (textSize + message.text.length > TEXT_CHAR_LIMIT) { truncated = true; break; }
-    textSize += message.text.length;
     textTokens += Math.ceil(message.text.length / CHARS_PER_TOKEN) + MESSAGE_OVERHEAD_TOKENS;
     included++;
     if (message.role === 'user') {

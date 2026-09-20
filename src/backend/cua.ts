@@ -23,7 +23,10 @@ export interface AgentToolDef { name: string; description: string; inputSchema: 
 export type ModelToolOutput = { type: 'content'; value: Array<{ type: 'text'; text: string } | { type: 'image-data'; data: string; mediaType: string }> };
 export interface ToolExecutionResult { text: string; isError: boolean; modelOutput?: ModelToolOutput }
 export interface Toolbag {
+  /** Stable provider-native declarations for this turn. */
   tools: AgentToolDef[];
+  /** Request-selected definitions rendered into hidden turn context, never native provider tools. */
+  selectedTools?: readonly AgentToolDef[];
   weights?: readonly ToolWeightLabel[];
   execute(name: string, args: unknown): Promise<ToolExecutionResult>;
   close(): void;
