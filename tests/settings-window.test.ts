@@ -76,7 +76,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
   });
   class Tray extends EventEmitter { setTitle() {} setToolTip() {} setContextMenu() {} }
   const modules: Record<string, unknown> = {
-    electron: { app, BrowserWindow: FakeWindow, Tray, nativeImage: { createEmpty() {} },
+    electron: { app, BrowserWindow: FakeWindow, Tray, nativeImage: { createFromPath() { return { setTemplateImage() {} }; } },
       protocol: { registerSchemesAsPrivileged() {}, handle() {} },
       clipboard: { writeText() {} },
       globalShortcut: { register: () => true, unregisterAll() {} },

@@ -63,6 +63,7 @@
       "to": "native/moki-dictate"
     }],
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.productivity",
       "target": ["dmg"],
       "identity": null,

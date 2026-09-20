@@ -8,8 +8,11 @@ async function bundle(options: Parameters<typeof Bun.build>[0]) {
   if (!result.success) throw new AggregateError(result.logs, 'Build failed');
 }
 await mkdir(`${out}/electron`, { recursive: true });
+await mkdir(`${out}/electron/assets`, { recursive: true });
 await mkdir(`${out}/backend`, { recursive: true });
 await bundle({ entrypoints: ['src/electron/main.ts', 'src/electron/preload.ts'], outdir: `${out}/electron`, target: 'node', format: 'cjs', external: ['electron'], naming: '[name].cjs', sourcemap: development ? 'external' : 'none' });
+await copyFile('assets/tray/mokiTemplate.png', `${out}/electron/assets/mokiTemplate.png`);
+await copyFile('assets/tray/mokiTemplate@2x.png', `${out}/electron/assets/mokiTemplate@2x.png`);
 if (development) {
   await writeFile('dist/dev/package.json', JSON.stringify({ name: 'moki-dev', productName: 'Moki Dev', version: '0.0.0', main: 'dist/electron/main.cjs' }));
 } else {

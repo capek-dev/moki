@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <title>Moki</title>
+  <rect width="240" height="240" rx="56" fill="#0E1116"/>
+  <path d="M52 154V108C52 77 80 54 120 54C160 54 188 77 188 108V154"
+        fill="none" stroke="#FFFFFF" stroke-width="26"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="94" cy="112" r="11" fill="#FFFFFF"/>
+  <circle cx="146" cy="112" r="11" fill="#FFFFFF"/>
+  <path d="M47 177H193"
+        fill="none" stroke="#FFFFFF" stroke-width="26"
+        stroke-linecap="round"/>
+</svg>
