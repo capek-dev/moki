@@ -379,7 +379,8 @@ test('learning undo refuses to overwrite evidence added after a correction', asy
     await coordinator.run(async () => [{ kind: 'memory', action: 'correct', sourceMessageId: source.id, sourceRevision: source.revision!, sourceRole: 'user', memoryId: memory.id, expectedMemoryRevision: 1, text: 'Learned correction.', memoryKind: 'fact' }]);
     const history = store.learningRepository.history()[0];
     const corrected = store.memoryRepository.get(memory.id)!;
-    store.memoryRepository.addEvidence({ memoryId: memory.id, expectedMemoryRevision: corrected.revision, sourceMessageId: source.id, sourceRevision: source.revision!, stance: 'supporting', provenance: 'foreground support' });
+    const laterSource = store.handle({ method: 'saveMessage', conversationId: id, text: 'Independent later support.' }).snapshot.messages.at(-1)!;
+    store.memoryRepository.addEvidence({ memoryId: memory.id, expectedMemoryRevision: corrected.revision, sourceMessageId: laterSource.id, sourceRevision: laterSource.revision!, stance: 'supporting', provenance: 'foreground support' });
     expect(() => store.learningRepository.undoHistory(history.id, corrected.revision)).toThrow('revision conflict');
     expect(store.memoryRepository.get(memory.id)?.text).toBe('Learned correction.');
     coordinator.close();

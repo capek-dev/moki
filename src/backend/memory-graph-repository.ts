@@ -91,6 +91,13 @@ export type MemoryRoutingDescriptor = {
   label: string;
   aliases: string[];
   description: string | null;
+  origin?: 'explicit-topic' | 'entity' | 'derived-category';
+  localScore?: number;
+};
+export type MemoryRoutingDescriptorPage = {
+  descriptors: MemoryRoutingDescriptor[];
+  availableCount: number;
+  truncated: boolean;
 };
 export type EffectiveMemoryRead = {
   memory: MemoryRecord;
@@ -151,6 +158,18 @@ export function installMemoryGraphSchema(db: Database) {
       revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
     );
     CREATE INDEX IF NOT EXISTS entities_kind_label_idx ON entities (kind, label, id);
+    CREATE TABLE IF NOT EXISTS topic_merge_redirects (
+      aliasId TEXT PRIMARY KEY,
+      canonicalId TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+      mergedAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS topic_merge_redirects_canonical_idx ON topic_merge_redirects (canonicalId, aliasId);
+    CREATE TABLE IF NOT EXISTS entity_merge_redirects (
+      aliasId TEXT PRIMARY KEY,
+      canonicalId TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      mergedAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS entity_merge_redirects_canonical_idx ON entity_merge_redirects (canonicalId, aliasId);
     CREATE TABLE IF NOT EXISTS memory_topics (
       memoryId TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
       topicId TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
@@ -251,18 +270,31 @@ export class MemoryGraphRepository {
     if (installSchema) this.db.transaction(() => installMemoryGraphSchema(this.db))();
   }
 
+  private resolveTopicId(value: string): string {
+    const id = stableId(value, 'topic id');
+    return this.db.query<{ canonicalId: string }, [string]>('SELECT canonicalId FROM topic_merge_redirects WHERE aliasId = ?').get(id)?.canonicalId ?? id;
+  }
+
+  private resolveEntityId(value: string): string {
+    const id = stableId(value, 'entity id');
+    return this.db.query<{ canonicalId: string }, [string]>('SELECT canonicalId FROM entity_merge_redirects WHERE aliasId = ?').get(id)?.canonicalId ?? id;
+  }
+
   createTopic(input: CreateTopicInput): TopicRecord {
     const id = input.id === undefined ? crypto.randomUUID() : stableId(input.id, 'topic id');
     const label = nonEmpty(input.label, 'topic label', TOPIC_LABEL_MAX);
     const description = optionalText(input.description, 'topic description', DESCRIPTION_MAX);
     const aliasList = aliases(input.aliases);
     const recordedAt = input.recordedAt === undefined ? Date.now() : timestamp(input.recordedAt, 'recordedAt');
-    this.db.transaction(() => this.db.query('INSERT INTO topics (id, label, description, aliases, recordedAt, revision) VALUES (?, ?, ?, ?, ?, 1)').run(id, label, description, JSON.stringify(aliasList), recordedAt))();
+    this.db.transaction(() => {
+      if (this.db.query('SELECT 1 FROM topic_merge_redirects WHERE aliasId = ?').get(id)) throw new Error('Topic ID is a merge redirect.');
+      this.db.query('INSERT INTO topics (id, label, description, aliases, recordedAt, revision) VALUES (?, ?, ?, ?, ?, 1)').run(id, label, description, JSON.stringify(aliasList), recordedAt);
+    })();
     return this.getTopic(id)!;
   }
 
   getTopic(id: string): TopicRecord | null {
-    const row = this.db.query<TopicRow, [string]>('SELECT * FROM topics WHERE id = ?').get(stableId(id, 'topic id'));
+    const row = this.db.query<TopicRow, [string]>('SELECT * FROM topics WHERE id = ?').get(this.resolveTopicId(id));
     return row ? decodeTopic(row) : null;
   }
   listTopics(options: BoundedReadOptions = {}): TopicRecord[] {
@@ -270,7 +302,7 @@ export class MemoryGraphRepository {
     return this.db.query<TopicRow, [number, number]>('SELECT * FROM topics ORDER BY label, id LIMIT ? OFFSET ?').all(limit, offset).map(decodeTopic);
   }
   updateTopic(id: string, expectedRevision: number, patch: UpdateTopicInput): TopicRecord {
-    const topicId = stableId(id, 'topic id');
+    const topicId = this.resolveTopicId(id);
     const expected = revision(expectedRevision, 'topic revision');
     this.db.transaction(() => {
       const current = this.db.query<TopicRow, [string]>('SELECT * FROM topics WHERE id = ?').get(topicId);
@@ -285,6 +317,26 @@ export class MemoryGraphRepository {
     return this.getTopic(topicId)!;
   }
 
+  mergeTopic(aliasId: string, aliasExpectedRevision: number, canonicalId: string, canonicalExpectedRevision: number): TopicRecord {
+    const alias = this.resolveTopicId(aliasId);
+    const canonical = this.resolveTopicId(canonicalId);
+    if (alias === canonical) throw new Error('Topic merge requires two identities.');
+    const aliasRevision = revision(aliasExpectedRevision, 'topic revision');
+    const canonicalRevision = revision(canonicalExpectedRevision, 'topic revision');
+    this.db.transaction(() => {
+      const aliasRow = this.db.query<TopicRow, [string]>('SELECT * FROM topics WHERE id = ?').get(alias);
+      const canonicalRow = this.db.query<TopicRow, [string]>('SELECT * FROM topics WHERE id = ?').get(canonical);
+      if (!aliasRow || !canonicalRow) throw new Error('Topic not found.');
+      if (aliasRow.revision !== aliasRevision || canonicalRow.revision !== canonicalRevision) throw new Error('Topic revision conflict.');
+      this.db.query('INSERT OR IGNORE INTO memory_topics (memoryId, topicId) SELECT memoryId, ? FROM memory_topics WHERE topicId = ?').run(canonical, alias);
+      this.db.query('DELETE FROM memory_topics WHERE topicId = ?').run(alias);
+      this.db.query('UPDATE topic_merge_redirects SET canonicalId = ? WHERE canonicalId = ?').run(canonical, alias);
+      this.db.query('INSERT INTO topic_merge_redirects (aliasId, canonicalId, mergedAt) VALUES (?, ?, ?)').run(alias, canonical, Date.now());
+      this.db.query('DELETE FROM topics WHERE id = ?').run(alias);
+    })();
+    return this.getTopic(canonical)!;
+  }
+
   createEntity(input: CreateEntityInput): EntityRecord {
     const id = input.id === undefined ? crypto.randomUUID() : stableId(input.id, 'entity id');
     const kind = choice(input.kind, ENTITY_KINDS, 'entity kind');
@@ -292,11 +344,14 @@ export class MemoryGraphRepository {
     const description = optionalText(input.description, 'entity description', DESCRIPTION_MAX);
     const aliasList = aliases(input.aliases);
     const recordedAt = input.recordedAt === undefined ? Date.now() : timestamp(input.recordedAt, 'recordedAt');
-    this.db.transaction(() => this.db.query('INSERT INTO entities (id, kind, label, description, aliases, recordedAt, revision) VALUES (?, ?, ?, ?, ?, ?, 1)').run(id, kind, label, description, JSON.stringify(aliasList), recordedAt))();
+    this.db.transaction(() => {
+      if (this.db.query('SELECT 1 FROM entity_merge_redirects WHERE aliasId = ?').get(id)) throw new Error('Entity ID is a merge redirect.');
+      this.db.query('INSERT INTO entities (id, kind, label, description, aliases, recordedAt, revision) VALUES (?, ?, ?, ?, ?, ?, 1)').run(id, kind, label, description, JSON.stringify(aliasList), recordedAt);
+    })();
     return this.getEntity(id)!;
   }
   getEntity(id: string): EntityRecord | null {
-    const row = this.db.query<EntityRow, [string]>('SELECT * FROM entities WHERE id = ?').get(stableId(id, 'entity id'));
+    const row = this.db.query<EntityRow, [string]>('SELECT * FROM entities WHERE id = ?').get(this.resolveEntityId(id));
     return row ? decodeEntity(row) : null;
   }
   listEntities(options: BoundedReadOptions & { kind?: EntityKind } = {}): EntityRecord[] {
@@ -308,7 +363,7 @@ export class MemoryGraphRepository {
     return rows.map(decodeEntity);
   }
   updateEntity(id: string, expectedRevision: number, patch: UpdateEntityInput): EntityRecord {
-    const entityId = stableId(id, 'entity id');
+    const entityId = this.resolveEntityId(id);
     const expected = revision(expectedRevision, 'entity revision');
     this.db.transaction(() => {
       const current = this.db.query<EntityRow, [string]>('SELECT * FROM entities WHERE id = ?').get(entityId);
@@ -324,9 +379,45 @@ export class MemoryGraphRepository {
     return this.getEntity(entityId)!;
   }
 
+  mergeEntity(aliasId: string, aliasExpectedRevision: number, canonicalId: string, canonicalExpectedRevision: number): EntityRecord {
+    const alias = this.resolveEntityId(aliasId);
+    const canonical = this.resolveEntityId(canonicalId);
+    if (alias === canonical) throw new Error('Entity merge requires two identities.');
+    const aliasRevision = revision(aliasExpectedRevision, 'entity revision');
+    const canonicalRevision = revision(canonicalExpectedRevision, 'entity revision');
+    this.db.transaction(() => {
+      const aliasRow = this.db.query<EntityRow, [string]>('SELECT * FROM entities WHERE id = ?').get(alias);
+      const canonicalRow = this.db.query<EntityRow, [string]>('SELECT * FROM entities WHERE id = ?').get(canonical);
+      if (!aliasRow || !canonicalRow) throw new Error('Entity not found.');
+      if (aliasRow.revision !== aliasRevision || canonicalRow.revision !== canonicalRevision) throw new Error('Entity revision conflict.');
+      const relationships = this.db.query<{ id: string; kind: RelationshipKind; subjectId: string; objectId: string }, [string, string]>('SELECT id, kind, subjectId, objectId FROM memory_relationships WHERE subjectId = ? OR objectId = ? ORDER BY id').all(alias, alias);
+      for (const relationship of relationships) {
+        let subjectId = relationship.subjectId === alias ? canonical : relationship.subjectId;
+        let objectId = relationship.objectId === alias ? canonical : relationship.objectId;
+        if (subjectId === objectId) {
+          this.db.query('DELETE FROM memory_relationships WHERE id = ?').run(relationship.id);
+          continue;
+        }
+        if (SYMMETRIC_KINDS.includes(relationship.kind) && objectId < subjectId) [subjectId, objectId] = [objectId, subjectId];
+        const duplicate = this.db.query<{ id: string }, [string, string, string, string]>('SELECT id FROM memory_relationships WHERE kind = ? AND subjectId = ? AND objectId = ? AND id <> ?').get(relationship.kind, subjectId, objectId, relationship.id);
+        if (duplicate) {
+          this.db.query('DELETE FROM memory_relationships WHERE id = ?').run(relationship.id);
+          continue;
+        }
+        const subjectRevision = this.endpoint(relationship.kind, subjectId, 'subject').revision;
+        const objectRevision = this.endpoint(relationship.kind, objectId, 'object').revision;
+        this.db.query('UPDATE memory_relationships SET subjectId = ?, objectId = ?, subjectRevision = ?, objectRevision = ?, revision = revision + 1 WHERE id = ?').run(subjectId, objectId, subjectRevision, objectRevision, relationship.id);
+      }
+      this.db.query('UPDATE entity_merge_redirects SET canonicalId = ? WHERE canonicalId = ?').run(canonical, alias);
+      this.db.query('INSERT INTO entity_merge_redirects (aliasId, canonicalId, mergedAt) VALUES (?, ?, ?)').run(alias, canonical, Date.now());
+      this.db.query('DELETE FROM entities WHERE id = ?').run(alias);
+    })();
+    return this.getEntity(canonical)!;
+  }
+
   addMemoryTopic(input: MemoryTopicInput) {
     const memoryId = stableId(input.memoryId, 'memory id');
-    const topicId = stableId(input.topicId, 'topic id');
+    const topicId = this.resolveTopicId(input.topicId);
     const expectedMemoryRevision = revision(input.expectedMemoryRevision, 'memory revision');
     const expectedTopicRevision = revision(input.expectedTopicRevision, 'topic revision');
     this.db.transaction(() => {
@@ -343,7 +434,7 @@ export class MemoryGraphRepository {
   }
   removeMemoryTopic(memoryId: string, topicId: string, expectedMemoryRevision: number, expectedTopicRevision: number) {
     const id = stableId(memoryId, 'memory id');
-    const topic = stableId(topicId, 'topic id');
+    const topic = this.resolveTopicId(topicId);
     const expectedMemory = revision(expectedMemoryRevision, 'memory revision');
     const expectedTopic = revision(expectedTopicRevision, 'topic revision');
     this.db.transaction(() => {
@@ -362,7 +453,7 @@ export class MemoryGraphRepository {
     return this.db.query<TopicRow, [string, number, number]>('SELECT t.* FROM topics t JOIN memory_topics mt ON mt.topicId = t.id WHERE mt.memoryId = ? ORDER BY t.label, t.id LIMIT ? OFFSET ?').all(id, limit, offset).map(decodeTopic);
   }
   memoriesForTopic(topicId: string, options: BoundedReadOptions = {}): string[] {
-    const id = stableId(topicId, 'topic id');
+    const id = this.resolveTopicId(topicId);
     const { limit, offset } = this.bounds(options);
     return this.db.query<{ memoryId: string }, [string, number, number]>('SELECT memoryId FROM memory_topics WHERE topicId = ? ORDER BY memoryId LIMIT ? OFFSET ?').all(id, limit, offset).map((row) => row.memoryId);
   }
@@ -392,7 +483,7 @@ export class MemoryGraphRepository {
           AND (
             EXISTS (SELECT 1 FROM memory_evidence e JOIN messages s ON s.id = e.sourceMessageId
               WHERE e.memoryId = m.id AND e.memoryRevision = m.revision AND e.stance = 'supporting'
-                AND e.sourceRole = 'user' AND s.role = 'user' AND s.revision = e.sourceRevision AND s.status <> 'streaming'
+                AND e.modality NOT IN ('quotation', 'hypothetical') AND e.sourceRole = 'user' AND s.role = 'user' AND s.revision = e.sourceRevision AND s.status <> 'streaming'
                 AND NOT (e.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
             OR ((m.core = 1 OR m.pinned = 1) AND NOT EXISTS (SELECT 1 FROM memory_evidence e WHERE e.memoryId = m.id))
           ) GROUP BY c.topicId, c.label
@@ -400,47 +491,138 @@ export class MemoryGraphRepository {
     return rows.map((row) => ({ kind: row.kind, id: row.id, label: row.label, aliases: parseAliases(row.aliases), description: row.description }));
   }
 
-  /** Expand selected entities by exactly one supported, currently valid hop. */
-  expandEntityIds(ids: readonly string[], limit = 24): string[] {
-    const selected = [...new Set(ids)].map((id) => stableId(id, 'entity id')).slice(0, 64);
+  /**
+   * Build a bounded, deliberately balanced routing page. Only descriptors tied
+   * to an active, potentially recallable memory or a currently valid path to
+   * one consume Jev capacity. Local text matches rank first inside each lane.
+   */
+  listRoutingDescriptorPage(options: { limit?: number; applicableAt?: number; evidence?: string } = {}): MemoryRoutingDescriptorPage {
+    const limit = options.limit ?? 80;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid routing descriptor limit.');
+    const at = applicableAt(options.applicableAt);
+    const evidence = (options.evidence ?? '').normalize('NFKC').toLocaleLowerCase().slice(0, 10_000);
+    const laneLimit = 100;
+    const validSupport = `EXISTS (SELECT 1 FROM memory_evidence me JOIN messages ms ON ms.id = me.sourceMessageId
+      WHERE me.memoryId = m.id AND me.memoryRevision = m.revision AND me.stance = 'supporting'
+        AND me.modality NOT IN ('quotation', 'hypothetical') AND me.sourceRole = 'user' AND ms.role = 'user' AND ms.revision = me.sourceRevision AND ms.status <> 'streaming'
+        AND NOT (me.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = ms.conversationId)))`;
+    const validRelationship = (alias: string) => `${alias}.sourceMessageId IS NOT NULL AND ${alias}.sourceRole = 'user'
+      AND (${alias}.validFrom IS NULL OR ${alias}.validFrom <= ${at}) AND (${alias}.validUntil IS NULL OR ${at} < ${alias}.validUntil)
+      AND EXISTS (SELECT 1 FROM messages rs WHERE rs.id = ${alias}.sourceMessageId AND rs.role = 'user' AND rs.revision = ${alias}.sourceRevision AND rs.status <> 'streaming'
+        AND NOT (${alias}.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = rs.conversationId)))`;
+    const potentialMemory = `m.state = 'active'
+      AND (m.validFrom IS NULL OR m.validFrom <= ${at}) AND (m.validUntil IS NULL OR ${at} < m.validUntil)
+      AND (${validSupport} OR ((m.core = 1 OR m.pinned = 1) AND NOT EXISTS (SELECT 1 FROM memory_evidence anyEvidence WHERE anyEvidence.memoryId = m.id)))
+      AND NOT EXISTS (SELECT 1 FROM memory_evidence contradiction JOIN messages contradictionSource ON contradictionSource.id = contradiction.sourceMessageId
+        WHERE contradiction.memoryId = m.id AND contradiction.memoryRevision = m.revision AND contradiction.stance = 'contradicting'
+          AND contradiction.modality NOT IN ('quotation', 'hypothetical') AND contradiction.sourceRole = 'user' AND contradictionSource.role = 'user' AND contradictionSource.revision = contradiction.sourceRevision AND contradictionSource.status <> 'streaming'
+          AND NOT (contradiction.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = contradictionSource.conversationId)))
+      AND NOT EXISTS (SELECT 1 FROM memory_relationships suppressing
+        WHERE ((suppressing.kind = 'supersedes' AND suppressing.explicit = 1 AND suppressing.objectId = m.id)
+          OR (suppressing.kind = 'contradicts' AND (suppressing.subjectId = m.id OR suppressing.objectId = m.id)))
+          AND ${validRelationship('suppressing')}
+          AND EXISTS (SELECT 1 FROM memories subjectMemory WHERE subjectMemory.id = suppressing.subjectId AND subjectMemory.revision = suppressing.subjectRevision)
+          AND EXISTS (SELECT 1 FROM memories objectMemory WHERE objectMemory.id = suppressing.objectId AND objectMemory.revision = suppressing.objectRevision))`;
+    type DescriptorRow = { kind: 'topic' | 'entity'; id: string; label: string; aliases: string; description: string | null; origin: 'explicit-topic' | 'entity' | 'derived-category'; laneAvailableCount: number };
+    const topicRows = this.db.query<DescriptorRow, (string | number)[]>(`SELECT 'topic' AS kind, t.id, t.label, t.aliases, t.description, 'explicit-topic' AS origin, COUNT(*) OVER() AS laneAvailableCount
+      FROM topics t WHERE EXISTS (SELECT 1 FROM memory_topics mt JOIN memories m ON m.id = mt.memoryId WHERE mt.topicId = t.id AND ${potentialMemory})
+      ORDER BY CASE WHEN instr(?, lower(t.label)) > 0 OR EXISTS (SELECT 1 FROM json_each(t.aliases) alias WHERE instr(?, lower(alias.value)) > 0) THEN 0 ELSE 1 END, t.label, t.id LIMIT ?`).all(evidence, evidence, laneLimit);
+    const categoryRows = this.db.query<DescriptorRow, (string | number)[]>(`SELECT 'topic' AS kind, c.topicId AS id, c.label, '[]' AS aliases,
+        CASE WHEN MIN(c.origin) = MAX(c.origin) AND MIN(c.origin) = 'reviewer'
+          THEN 'Automatically categorized memories. Routing metadata, not factual evidence.'
+          ELSE 'Automatically categorized memories, including broad local-rule labels for older records. Routing metadata, not factual evidence.' END AS description,
+        'derived-category' AS origin, COUNT(*) OVER() AS laneAvailableCount
+      FROM memory_routing_categories c JOIN memories m ON m.id = c.memoryId AND m.revision = c.memoryRevision
+      WHERE ${potentialMemory} GROUP BY c.topicId, c.label
+      ORDER BY CASE WHEN instr(?, lower(c.label)) > 0 THEN 0 ELSE 1 END, c.label, c.topicId LIMIT ?`).all(evidence, laneLimit);
+    const entityRows = this.db.query<DescriptorRow, (string | number)[]>(`SELECT 'entity' AS kind, e.id, e.label, e.aliases, e.description, 'entity' AS origin, COUNT(*) OVER() AS laneAvailableCount FROM entities e
+      WHERE EXISTS (
+        SELECT 1 FROM memory_relationships r JOIN memories m ON m.id = r.subjectId
+        WHERE r.kind = 'about' AND r.objectId = e.id AND r.subjectRevision = m.revision AND r.objectRevision = e.revision
+          AND ${validRelationship('r')} AND ${potentialMemory}
+      ) OR EXISTS (
+        SELECT 1 FROM memory_relationships link
+        WHERE link.kind = 'involves' AND (link.subjectId = e.id OR link.objectId = e.id) AND ${validRelationship('link')}
+          AND EXISTS (SELECT 1 FROM entities se WHERE se.id = link.subjectId AND se.revision = link.subjectRevision)
+          AND EXISTS (SELECT 1 FROM entities oe WHERE oe.id = link.objectId AND oe.revision = link.objectRevision)
+          AND EXISTS (
+            SELECT 1 FROM memory_relationships about JOIN memories m ON m.id = about.subjectId
+            WHERE about.kind = 'about'
+              AND about.objectId = CASE WHEN link.subjectId = e.id THEN link.objectId ELSE link.subjectId END
+              AND about.subjectRevision = m.revision
+              AND EXISTS (SELECT 1 FROM entities targetEntity WHERE targetEntity.id = about.objectId AND targetEntity.revision = about.objectRevision)
+              AND ${validRelationship('about')} AND ${potentialMemory}
+          )
+      )
+      ORDER BY CASE WHEN instr(?, lower(e.label)) > 0 OR EXISTS (SELECT 1 FROM json_each(e.aliases) alias WHERE instr(?, lower(alias.value)) > 0) THEN 0 ELSE 1 END, e.kind, e.label, e.id LIMIT ?`).all(evidence, evidence, laneLimit);
+    const decode = (row: DescriptorRow): MemoryRoutingDescriptor => {
+      const descriptor = { kind: row.kind, id: row.id, label: row.label, aliases: parseAliases(row.aliases), description: row.description, origin: row.origin };
+      const values = [descriptor.label, ...descriptor.aliases].map((value) => value.normalize('NFKC').toLocaleLowerCase());
+      const localScore = values.reduce((score, value, index) => score + (evidence.includes(value) ? (index === 0 ? 100 : 80) : value.split(/\s+/u).filter((term) => term.length > 2 && evidence.includes(term)).length * (index === 0 ? 4 : 2)), 0);
+      return { ...descriptor, localScore };
+    };
+    const lanes = [topicRows.map(decode), entityRows.map(decode), categoryRows.map(decode)];
+    const baseQuota = Math.floor(Math.max(0, limit - Math.min(8, limit)) / 3);
+    const selected: MemoryRoutingDescriptor[] = [];
+    const leftovers: MemoryRoutingDescriptor[] = [];
+    for (const lane of lanes) {
+      lane.sort((left, right) => (right.localScore ?? 0) - (left.localScore ?? 0) || left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+      selected.push(...lane.slice(0, baseQuota));
+      leftovers.push(...lane.slice(baseQuota));
+    }
+    leftovers.sort((left, right) => (right.localScore ?? 0) - (left.localScore ?? 0) || left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+    selected.push(...leftovers.slice(0, Math.max(0, limit - selected.length)));
+    const availableCount = (topicRows[0]?.laneAvailableCount ?? 0) + (entityRows[0]?.laneAvailableCount ?? 0) + (categoryRows[0]?.laneAvailableCount ?? 0);
+    return { descriptors: selected.slice(0, limit), availableCount, truncated: availableCount > limit };
+  }
+
+  /** Expand selected entities by exactly one supported, revision-valid, date-applicable hop. */
+  expandEntityIds(ids: readonly string[], limit = 24, applicableAtTime: number = Date.now()): string[] {
+    const selected = [...new Set(ids.map((id) => this.resolveEntityId(id)))].slice(0, 64);
     if (!selected.length) return [];
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid entity expansion limit.');
+    const at = applicableAt(applicableAtTime);
     const placeholders = selected.map(() => '?').join(',');
     const rows = this.db.query<{ id: string }, (string | number)[]>(`
       SELECT id FROM (
         SELECT r.objectId AS id FROM memory_relationships r
         WHERE r.kind = 'involves' AND r.subjectId IN (${placeholders}) AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user'
+          AND (r.validFrom IS NULL OR r.validFrom <= ?) AND (r.validUntil IS NULL OR ? < r.validUntil)
           AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
           AND EXISTS (SELECT 1 FROM entities subjectEntity WHERE subjectEntity.id = r.subjectId AND subjectEntity.revision = r.subjectRevision)
           AND EXISTS (SELECT 1 FROM entities objectEntity WHERE objectEntity.id = r.objectId AND objectEntity.revision = r.objectRevision)
         UNION
         SELECT r.subjectId AS id FROM memory_relationships r
         WHERE r.kind = 'involves' AND r.objectId IN (${placeholders}) AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user'
+          AND (r.validFrom IS NULL OR r.validFrom <= ?) AND (r.validUntil IS NULL OR ? < r.validUntil)
           AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
           AND EXISTS (SELECT 1 FROM entities subjectEntity WHERE subjectEntity.id = r.subjectId AND subjectEntity.revision = r.subjectRevision)
           AND EXISTS (SELECT 1 FROM entities objectEntity WHERE objectEntity.id = r.objectId AND objectEntity.revision = r.objectRevision)
-      ) WHERE id NOT IN (${selected.map(() => '?').join(',')}) ORDER BY id LIMIT ?`).all(...selected, ...selected, ...selected, limit);
+      ) WHERE id NOT IN (${selected.map(() => '?').join(',')}) ORDER BY id LIMIT ?`).all(...selected, at, at, ...selected, at, at, ...selected, limit);
     return [...selected, ...rows.map((row) => stableId(row.id, 'expanded entity id'))].slice(0, limit + selected.length);
   }
 
-  /** Expand memory associations by exactly one related_to hop. */
-  expandRelatedMemoryIds(ids: readonly string[], limit = 24): string[] {
+  /** Expand memory associations by exactly one supported, revision-valid, date-applicable related_to hop. */
+  expandRelatedMemoryIds(ids: readonly string[], limit = 24, applicableAtTime: number = Date.now()): string[] {
     const selected = [...new Set(ids)].map((id) => stableId(id, 'memory id')).slice(0, 80);
     if (!selected.length) return [];
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid memory expansion limit.');
+    const at = applicableAt(applicableAtTime);
     const placeholders = selected.map(() => '?').join(',');
     const rows = this.db.query<{ id: string }, (string | number)[]>(`
       SELECT id FROM (
         SELECT r.objectId AS id FROM memory_relationships r WHERE r.kind = 'related_to' AND r.subjectId IN (${placeholders}) AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user'
+          AND (r.validFrom IS NULL OR r.validFrom <= ?) AND (r.validUntil IS NULL OR ? < r.validUntil)
           AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
           AND EXISTS (SELECT 1 FROM memories subjectMemory WHERE subjectMemory.id = r.subjectId AND subjectMemory.revision = r.subjectRevision)
           AND EXISTS (SELECT 1 FROM memories objectMemory WHERE objectMemory.id = r.objectId AND objectMemory.revision = r.objectRevision)
         UNION
         SELECT r.subjectId AS id FROM memory_relationships r WHERE r.kind = 'related_to' AND r.objectId IN (${placeholders}) AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user'
+          AND (r.validFrom IS NULL OR r.validFrom <= ?) AND (r.validUntil IS NULL OR ? < r.validUntil)
           AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
           AND EXISTS (SELECT 1 FROM memories subjectMemory WHERE subjectMemory.id = r.subjectId AND subjectMemory.revision = r.subjectRevision)
           AND EXISTS (SELECT 1 FROM memories objectMemory WHERE objectMemory.id = r.objectId AND objectMemory.revision = r.objectRevision)
-      ) WHERE id NOT IN (${selected.map(() => '?').join(',')}) ORDER BY id LIMIT ?`).all(...selected, ...selected, ...selected, limit);
+      ) WHERE id NOT IN (${selected.map(() => '?').join(',')}) ORDER BY id LIMIT ?`).all(...selected, at, at, ...selected, at, at, ...selected, limit);
     return rows.map((row) => stableId(row.id, 'expanded memory id'));
   }
 
@@ -503,7 +685,11 @@ export class MemoryGraphRepository {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
     if (kind !== undefined) { conditions.push('r.kind = ?'); params.push(kind); }
-    if (endpointId !== undefined) { conditions.push('(r.subjectId = ? OR r.objectId = ?)'); params.push(endpointId, endpointId); }
+    if (endpointId !== undefined) {
+      const resolvedEntityId = this.resolveEntityId(endpointId);
+      conditions.push('(r.subjectId IN (?, ?) OR r.objectId IN (?, ?))');
+      params.push(endpointId, resolvedEntityId, endpointId, resolvedEntityId);
+    }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     return this.db.query<RelationshipRow, (string | number)[]>(`${this.relationshipSql()} ${where} ORDER BY r.recordedAt, r.id LIMIT ? OFFSET ?`).all(...params, limit, offset).map((row) => this.decodeRelationship(row));
   }

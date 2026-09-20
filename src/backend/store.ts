@@ -122,6 +122,7 @@ export class Store {
         add('messages', 'createdAt', 'INTEGER');
         add('messages', 'revision', 'INTEGER NOT NULL DEFAULT 1');
         add('message_model_context', 'memoryIdsJson', "TEXT NOT NULL DEFAULT '[]'");
+        add('memory_recall_history', 'diagnosticsJson', "TEXT NOT NULL DEFAULT '{}'");
         installMemorySchema(this.db);
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS message_model_context_memory (
@@ -245,7 +246,8 @@ export class Store {
   recordMemoryRecall(conversationId: string, messageId: string, inspection: MemoryRecallInspection): MemoryRecallHistoryRecord {
     const selected = inspection.selected.slice(0, 16).map((item) => ({ memoryId: text(item.memoryId, 100), revision: integer(item.revision, 'memory revision') }));
     const record: MemoryRecallHistoryRecord = { ...inspection, id: crypto.randomUUID(), conversationId: text(conversationId, 100), messageId: text(messageId, 100), selected, createdAt: Date.now() };
-    this.db.query('INSERT INTO memory_recall_history (id, conversationId, messageId, mode, outcome, selectedJson, candidateCount, descriptorCount, relationshipCount, elapsedMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(record.id, record.conversationId, record.messageId, record.mode, record.outcome.slice(0, 80), JSON.stringify(record.selected), record.candidateCount, record.descriptorCount, record.relationshipCount, record.elapsedMs, record.createdAt);
+    const diagnosticsJson = JSON.stringify({ descriptorAvailableCount: record.descriptorAvailableCount, descriptorsTruncated: record.descriptorsTruncated, selectedDescriptorCount: record.selectedDescriptorCount, topicSeedCount: record.topicSeedCount, entitySeedCount: record.entitySeedCount, lexicalSeedCount: record.lexicalSeedCount, expandedEntityCount: record.expandedEntityCount, expandedMemoryCount: record.expandedMemoryCount, fallbackReason: record.fallbackReason?.slice(0, 120) });
+    this.db.query('INSERT INTO memory_recall_history (id, conversationId, messageId, mode, outcome, selectedJson, candidateCount, descriptorCount, diagnosticsJson, relationshipCount, elapsedMs, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(record.id, record.conversationId, record.messageId, record.mode, record.outcome.slice(0, 80), JSON.stringify(record.selected), record.candidateCount, record.descriptorCount, diagnosticsJson, record.relationshipCount, record.elapsedMs, record.createdAt);
     this.db.exec('DELETE FROM memory_recall_history WHERE id NOT IN (SELECT id FROM memory_recall_history ORDER BY createdAt DESC, id DESC LIMIT 200)');
     return record;
   }
@@ -276,14 +278,30 @@ export class Store {
     const pageLimit = typeof limit === 'number' ? limit : Number.NaN;
     const pageOffset = typeof offset === 'number' ? offset : Number.NaN;
     if (!Number.isSafeInteger(pageLimit) || pageLimit < 1 || pageLimit > 50 || !Number.isSafeInteger(pageOffset) || pageOffset < 0 || pageOffset > 10000) throw new Error('Invalid memory recall history page.');
-    const rows = this.db.query<{ id: string; conversationId: string; messageId: string; mode: 'basic' | 'jev'; outcome: string; selectedJson: string; candidateCount: number; descriptorCount: number; relationshipCount: number; elapsedMs: number; createdAt: number }, [number, number]>('SELECT * FROM memory_recall_history ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?').all(pageLimit + 1, pageOffset);
+    const rows = this.db.query<{ id: string; conversationId: string; messageId: string; mode: 'basic' | 'jev'; outcome: string; selectedJson: string; candidateCount: number; descriptorCount: number; diagnosticsJson: string; relationshipCount: number; elapsedMs: number; createdAt: number }, [number, number]>('SELECT * FROM memory_recall_history ORDER BY createdAt DESC, id DESC LIMIT ? OFFSET ?').all(pageLimit + 1, pageOffset);
     const records = rows.slice(0, pageLimit).map((row): MemoryRecallHistoryRecord => {
       let selected: MemoryRecallHistoryRecord['selected'] = [];
       try {
         const parsed = JSON.parse(row.selectedJson) as unknown;
         if (Array.isArray(parsed)) selected = parsed.filter((item): item is { memoryId: string; revision: number } => item !== null && typeof item === 'object' && typeof (item as { memoryId?: unknown }).memoryId === 'string' && Number.isSafeInteger((item as { revision?: unknown }).revision)).slice(0, 16);
       } catch { selected = []; }
-      return { id: row.id, conversationId: row.conversationId, messageId: row.messageId, mode: row.mode, outcome: row.outcome, selected, candidateCount: row.candidateCount, descriptorCount: row.descriptorCount, relationshipCount: row.relationshipCount, elapsedMs: row.elapsedMs, createdAt: row.createdAt };
+      let diagnostics: Partial<MemoryRecallInspection> = {};
+      try {
+        const parsed = JSON.parse(row.diagnosticsJson) as Record<string, unknown>;
+        const numberField = (name: keyof MemoryRecallInspection) => typeof parsed[name] === 'number' && Number.isSafeInteger(parsed[name]) && parsed[name] >= 0 ? parsed[name] as number : undefined;
+        diagnostics = {
+          descriptorAvailableCount: numberField('descriptorAvailableCount'),
+          descriptorsTruncated: typeof parsed.descriptorsTruncated === 'boolean' ? parsed.descriptorsTruncated : undefined,
+          selectedDescriptorCount: numberField('selectedDescriptorCount'),
+          topicSeedCount: numberField('topicSeedCount'),
+          entitySeedCount: numberField('entitySeedCount'),
+          lexicalSeedCount: numberField('lexicalSeedCount'),
+          expandedEntityCount: numberField('expandedEntityCount'),
+          expandedMemoryCount: numberField('expandedMemoryCount'),
+          fallbackReason: typeof parsed.fallbackReason === 'string' ? parsed.fallbackReason.slice(0, 120) : undefined,
+        };
+      } catch { diagnostics = {}; }
+      return { id: row.id, conversationId: row.conversationId, messageId: row.messageId, mode: row.mode, outcome: row.outcome, selected, candidateCount: row.candidateCount, descriptorCount: row.descriptorCount, ...diagnostics, relationshipCount: row.relationshipCount, elapsedMs: row.elapsedMs, createdAt: row.createdAt };
     });
     return { records, offset: pageOffset, nextOffset: rows.length > pageLimit ? pageOffset + pageLimit : null };
   }

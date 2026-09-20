@@ -41,6 +41,7 @@ export interface BasicRecallEntry {
   sourceCreatedAt: number | null;
   extractionRecordedAt: number | null;
   sourceProvenance: string | null;
+  sourceModality: BasicRecallCandidate['sourceModality'];
 }
 
 function boundedInteger(value: number | undefined, fallback: number, name: string, maximum: number): number {
@@ -66,6 +67,7 @@ export function entryView(candidate: BasicRecallCandidate): BasicRecallEntry {
     sourceCreatedAt: candidate.sourceCreatedAt,
     extractionRecordedAt: candidate.extractionRecordedAt,
     sourceProvenance: candidate.sourceProvenance,
+    sourceModality: candidate.sourceModality,
   };
 }
 
@@ -85,6 +87,7 @@ function renderEntry(entry: BasicRecallEntry): string {
       lastSupportedAt: dateLabel(entry.lastSupportedAt),
       extractionRecordedAt: dateLabel(entry.extractionRecordedAt),
       provenance: entry.sourceProvenance,
+      modality: entry.sourceModality,
     } : {
       type: 'source-less',
       sourceTime: 'unknown date',

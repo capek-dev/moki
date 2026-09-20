@@ -11,6 +11,8 @@ export type MemoryJevEvalCase = {
   selectedDescriptors: string[];
   expected: string[];
   forbidden: string[];
+  expectedRequests?: number;
+  allowUnexpected?: boolean;
 };
 
 type CaseSetup = {
@@ -19,6 +21,9 @@ type CaseSetup = {
   forbidden: Set<string>;
   memoryLabels: Map<string, string>;
   memoryTexts: string[];
+  transport?: 'timeout';
+  expectedRequests: number;
+  allowUnexpected: boolean;
 };
 
 type EvalRow = {
@@ -31,6 +36,10 @@ type EvalRow = {
   missing: string[];
   unexpected: string[];
   outcome: string;
+  descriptorPrecision: number;
+  descriptorRecall: number;
+  memoryPrecision: number;
+  memoryRecall: number;
   passed: boolean;
 };
 
@@ -152,6 +161,78 @@ function setupCase(store: Store, definition: MemoryJevEvalCase): CaseSetup {
       if (!memory) throw new Error('Synthetic setup failed.');
       break;
     }
+    case 'descriptor-overflow': {
+      const sourceMessage = source(store, 'Needle descriptor source.');
+      const memory = add(sourceMessage, 'Needle descriptor memory', 'Needle descriptor result.');
+      for (let index = 0; index < 81; index++) {
+        const topic = store.memoryGraphRepository.createTopic({ label: index === 80 ? 'zzzz needle descriptor' : `descriptor ${index.toString().padStart(3, '0')}` });
+        store.memoryGraphRepository.addMemoryTopic({ memoryId: memory.id, topicId: topic.id, expectedMemoryRevision: 1, expectedTopicRevision: 1 });
+      }
+      break;
+    }
+    case 'category-overflow': {
+      const sourceMessage = source(store, 'Large category source.');
+      const topic = store.memoryGraphRepository.createTopic({ label: 'Large category' });
+      for (let index = 0; index < 80; index++) {
+        const memory = add(sourceMessage, `Category filler ${index}`, `Filler category record ${index}.`);
+        store.memoryGraphRepository.addMemoryTopic({ memoryId: memory.id, topicId: topic.id, expectedMemoryRevision: 1, expectedTopicRevision: 1 });
+      }
+      const targetSource = source(store, 'Needle record source.');
+      const target = add(targetSource, 'Category needle', 'Needle record in the large category.');
+      store.memoryGraphRepository.addMemoryTopic({ memoryId: target.id, topicId: topic.id, expectedMemoryRevision: 1, expectedTopicRevision: 1 });
+      break;
+    }
+    case 'expired-graph': {
+      const sourceMessage = source(store, 'Current and expired trip participants.');
+      const now = Date.now();
+      store.memoryGraphRepository.createEntity({ id: IDS.lisbonTrip, kind: 'trip', label: 'Lisbon trip' });
+      store.memoryGraphRepository.createEntity({ id: IDS.alex, kind: 'person', label: 'Alex' });
+      store.memoryGraphRepository.createEntity({ id: IDS.sam, kind: 'person', label: 'Sam' });
+      add(sourceMessage, 'Alex current need', 'Alex needs step-free access.', IDS.alex);
+      add(sourceMessage, 'Sam expired need', 'Sam needs a quiet room.', IDS.sam);
+      store.memoryGraphRepository.createRelationship({ kind: 'involves', subjectId: IDS.lisbonTrip, objectId: IDS.alex, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'current', explicit: true, validFrom: now - 1000, validUntil: now + 60_000, sourceMessageId: sourceMessage.id, sourceRevision: sourceMessage.revision ?? 1 });
+      store.memoryGraphRepository.createRelationship({ kind: 'involves', subjectId: IDS.lisbonTrip, objectId: IDS.sam, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'expired', explicit: true, validFrom: now - 2000, validUntil: now - 1000, sourceMessageId: sourceMessage.id, sourceRevision: sourceMessage.revision ?? 1 });
+      break;
+    }
+    case 'no-label-lexical': {
+      const sourceMessage = source(store, 'Orchid placement.');
+      store.memoryGraphRepository.createEntity({ id: IDS.alex, kind: 'person', label: 'Alex' });
+      add(sourceMessage, 'Orchid placement', 'The orchid belongs by the window.', IDS.alex);
+      break;
+    }
+    case 'duplicate-labels': {
+      const sourceMessage = source(store, 'Project Atlas source.');
+      const topic = store.memoryGraphRepository.createTopic({ label: 'Project Atlas' });
+      const entity = store.memoryGraphRepository.createEntity({ kind: 'project', label: 'Project Atlas' });
+      const memory = add(sourceMessage, 'Atlas deadline', 'Project Atlas is due Friday.', entity.id);
+      store.memoryGraphRepository.addMemoryTopic({ memoryId: memory.id, topicId: topic.id, expectedMemoryRevision: 1, expectedTopicRevision: 1 });
+      break;
+    }
+    case 'multilingual-punctuation': {
+      const sourceMessage = source(store, 'São Paulo travel source.');
+      const place = store.memoryGraphRepository.createEntity({ kind: 'place', label: 'São Paulo', aliases: ['Sao Paulo'] });
+      add(sourceMessage, 'São Paulo note', 'São Paulo meetings start Monday.', place.id);
+      break;
+    }
+    case 'competing-budget': {
+      const sourceMessage = source(store, 'Ten ranked project facts.');
+      const project = store.memoryGraphRepository.createEntity({ kind: 'project', label: 'Budget project' });
+      for (let index = 0; index < 10; index++) {
+        const label = `Budget fact ${index}`;
+        const memory = store.memoryRepository.create({ text: `${label}.`, kind: 'fact', recordedAt: 1000 - index });
+        store.memoryRepository.addEvidence({ memoryId: memory.id, expectedMemoryRevision: 1, sourceMessageId: sourceMessage.id, sourceRevision: sourceMessage.revision ?? 1, stance: 'supporting', provenance: 'synthetic evaluation source' });
+        store.memoryGraphRepository.createRelationship({ kind: 'about', subjectId: memory.id, objectId: project.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'synthetic evaluation source', explicit: true, sourceMessageId: sourceMessage.id, sourceRevision: sourceMessage.revision ?? 1 });
+        memoryLabels.set(memory.id, label);
+        memoryTexts.push(memory.text);
+      }
+      break;
+    }
+    case 'timeout-fallback': {
+      const sourceMessage = source(store, 'Cobalt timeout source.');
+      store.memoryGraphRepository.createEntity({ id: IDS.alex, kind: 'person', label: 'Alex' });
+      add(sourceMessage, 'Cobalt fallback', 'The cobalt folder is on the desk.', IDS.alex);
+      break;
+    }
     default: throw new Error(`Unknown Jev evaluation case: ${definition.id}`);
   }
 
@@ -161,6 +242,9 @@ function setupCase(store: Store, definition: MemoryJevEvalCase): CaseSetup {
     forbidden: new Set(definition.forbidden),
     memoryLabels,
     memoryTexts,
+    transport: definition.id === 'timeout-fallback' ? 'timeout' : undefined,
+    expectedRequests: definition.expectedRequests ?? 1,
+    allowUnexpected: definition.allowUnexpected === true,
   };
 }
 
@@ -169,6 +253,9 @@ function mockFetcher(setup: CaseSetup): { fetcher: JevFetcher; requests: () => n
   return {
     fetcher: async (_url, init) => {
       count++;
+      if (setup.transport === 'timeout') return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
       const body = JSON.parse(String(init?.body)) as { state: { descriptors: MemoryRoutingDescriptor[] } };
       const serializedState = JSON.stringify(body.state);
       if (setup.memoryTexts.some((text) => serializedState.includes(text))) throw new Error('Memory text crossed the Jev routing boundary.');
@@ -187,27 +274,36 @@ async function evaluateDefinition(definition: MemoryJevEvalCase, verification: '
     const setup = setupCase(store, definition);
     const mock = mockFetcher(setup);
     const fetcher = liveFetcher ?? mock.fetcher;
-    const result = await recallJev(store.memoryRepository, store.memoryGraphRepository, { request: definition.request, recent: definition.recent }, CONFIG, new AbortController().signal, { key }, fetcher);
+    const result = await recallJev(store.memoryRepository, store.memoryGraphRepository, { request: definition.request, recent: definition.recent }, CONFIG, new AbortController().signal, { key }, fetcher, Date.now(), setup.transport === 'timeout' ? { timeoutMs: 10 } : {});
     const requests = liveFetcher ? 1 : mock.requests();
     const selected = result.entries.map((entry) => setup.memoryLabels.get(entry.memory.id)).filter((label): label is string => label !== undefined);
     const expected = [...setup.expected];
     const forbidden = [...setup.forbidden];
     const missing = expected.filter((label) => !selected.includes(label));
     const unexpected = selected.filter((label) => !setup.expected.has(label));
-    const passed = result.inspection.outcome === 'jev_selected' || expected.length === 0
-      ? missing.length === 0 && unexpected.length === 0 && forbidden.every((label) => !selected.includes(label)) && requests === 1
-      : false;
-    return { id: definition.id, verification, requests, selected, expected, forbidden, missing, unexpected, outcome: result.inspection.outcome, passed };
+    const expectedDescriptors = setup.selected.size;
+    const selectedDescriptors = result.inspection.selectedDescriptorCount ?? 0;
+    const descriptorTruePositive = Math.min(expectedDescriptors, selectedDescriptors);
+    const memoryTruePositive = expected.filter((label) => selected.includes(label)).length;
+    const descriptorPrecision = selectedDescriptors === 0 ? (expectedDescriptors === 0 ? 1 : 0) : descriptorTruePositive / selectedDescriptors;
+    const descriptorRecall = expectedDescriptors === 0 ? 1 : descriptorTruePositive / expectedDescriptors;
+    const memoryPrecision = selected.length === 0 ? (expected.length === 0 ? 1 : 0) : memoryTruePositive / selected.length;
+    const memoryRecall = expected.length === 0 ? 1 : memoryTruePositive / expected.length;
+    const validOutcome = result.inspection.outcome === 'jev_selected' || result.inspection.outcome === 'jev_no_labels' || result.inspection.outcome === 'failed_fallback' || expected.length === 0;
+    const passed = validOutcome && missing.length === 0 && (setup.allowUnexpected || unexpected.length === 0)
+      && forbidden.every((label) => !selected.includes(label)) && requests === setup.expectedRequests;
+    return { id: definition.id, verification, requests, selected, expected, forbidden, missing, unexpected, outcome: result.inspection.outcome, descriptorPrecision, descriptorRecall, memoryPrecision, memoryRecall, passed };
   } finally {
     store.close();
   }
 }
 
-export async function runOfflineEvaluation(): Promise<{ verification: 'offline-mock'; cases: EvalRow[]; passed: boolean; note: string }> {
+export async function runOfflineEvaluation(): Promise<{ verification: 'offline-mock'; cases: EvalRow[]; thresholdCalibration: Array<{ threshold: number; accepted: number }>; passed: boolean; note: string }> {
   const cases = await Promise.all(CASES.map((definition) => evaluateDefinition(definition, 'mocked', 'offline-fixture')));
   return {
     verification: 'offline-mock',
     cases,
+    thresholdCalibration: [0.55, 0.60, 0.65, 0.70, 0.75, 0.80].map((threshold) => ({ threshold, accepted: [0.54, 0.60, 0.69, 0.70, 0.76, 0.85].filter((probability) => probability >= threshold).length })),
     passed: cases.every((item) => item.passed),
     note: 'Synthetic transport selects the fixture labels. This verifies retrieval wiring, filtering, bounds, privacy, and diagnostics, not model quality or provider precision.',
   };

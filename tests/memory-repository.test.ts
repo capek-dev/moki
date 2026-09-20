@@ -270,3 +270,20 @@ test('forget persists suppression and an exact retry is idempotent after reopen'
     } finally { reopened.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('evidence modality persists and quotations or hypotheticals do not establish recall support', () => {
+  const store = new Store(':memory:');
+  try {
+    const conversationId = conversation(store);
+    const quotedSource = store.handle({ method: 'saveMessage', conversationId, text: 'Someone said they live in Rome.' }).snapshot.messages.at(-1)!;
+    const quoted = store.memoryRepository.create({ text: 'The user lives in Rome.', kind: 'fact' });
+    const evidence = store.memoryRepository.addEvidence({ memoryId: quoted.id, expectedMemoryRevision: 1, sourceMessageId: quotedSource.id, sourceRevision: quotedSource.revision!, stance: 'supporting', modality: 'quotation', provenance: 'quoted statement' });
+    expect(evidence.modality).toBe('quotation');
+    expect(store.memoryRepository.listBasicRecallCandidates({ ids: [quoted.id] })).toEqual([]);
+
+    const directSource = store.handle({ method: 'saveMessage', conversationId, text: 'I intend to visit Rome.' }).snapshot.messages.at(-1)!;
+    const intention = store.memoryRepository.create({ text: 'The user intends to visit Rome.', kind: 'fact' });
+    store.memoryRepository.addEvidence({ memoryId: intention.id, expectedMemoryRevision: 1, sourceMessageId: directSource.id, sourceRevision: directSource.revision!, stance: 'supporting', modality: 'intention', provenance: 'direct intention' });
+    expect(store.memoryRepository.listBasicRecallCandidates({ ids: [intention.id] })[0]).toMatchObject({ sourceModality: 'intention' });
+  } finally { store.close(); }
+});

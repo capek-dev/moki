@@ -165,6 +165,32 @@ test('relationship support checks source and endpoint revisions independently wi
   } finally { store.close(); }
 });
 
+test('Jev graph expansion honors inclusive starts and exclusive ends', () => {
+  const store = new Store(':memory:');
+  try {
+    const graph = store.memoryGraphRepository;
+    const conversationId = conversation(store);
+    const relationshipSource = source(store, conversationId, 'Time-bounded routing links.');
+    const selectedEntity = graph.createEntity({ kind: 'trip', label: 'Selected trip' });
+    const activeEntity = graph.createEntity({ kind: 'person', label: 'Active person' });
+    const expiredEntity = graph.createEntity({ kind: 'person', label: 'Expired person' });
+    const futureEntity = graph.createEntity({ kind: 'person', label: 'Future person' });
+    graph.createRelationship({ kind: 'involves', subjectId: selectedEntity.id, objectId: activeEntity.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'active interval', explicit: true, validFrom: 100, validUntil: 200, sourceMessageId: relationshipSource.id, sourceRevision: relationshipSource.revision! });
+    graph.createRelationship({ kind: 'involves', subjectId: selectedEntity.id, objectId: expiredEntity.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'expired interval', explicit: true, validFrom: 10, validUntil: 100, sourceMessageId: relationshipSource.id, sourceRevision: relationshipSource.revision! });
+    graph.createRelationship({ kind: 'involves', subjectId: selectedEntity.id, objectId: futureEntity.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'future interval', explicit: true, validFrom: 101, sourceMessageId: relationshipSource.id, sourceRevision: relationshipSource.revision! });
+    expect(graph.expandEntityIds([selectedEntity.id], 24, 100)).toEqual([selectedEntity.id, activeEntity.id]);
+    expect(graph.expandEntityIds([selectedEntity.id], 24, 200)).toEqual([selectedEntity.id, futureEntity.id]);
+
+    const selectedMemory = memory(store, crypto.randomUUID(), 'Selected memory.');
+    const activeMemory = memory(store, crypto.randomUUID(), 'Active related memory.');
+    const expiredMemory = memory(store, crypto.randomUUID(), 'Expired related memory.');
+    graph.createRelationship({ kind: 'related_to', subjectId: selectedMemory.id, objectId: activeMemory.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'active memory interval', explicit: true, validFrom: 100, validUntil: 200, sourceMessageId: relationshipSource.id, sourceRevision: relationshipSource.revision! });
+    graph.createRelationship({ kind: 'related_to', subjectId: selectedMemory.id, objectId: expiredMemory.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'expired memory interval', explicit: true, validFrom: 10, validUntil: 100, sourceMessageId: relationshipSource.id, sourceRevision: relationshipSource.revision! });
+    expect(graph.expandRelatedMemoryIds([selectedMemory.id], 24, 100)).toEqual([activeMemory.id]);
+    expect(graph.expandRelatedMemoryIds([selectedMemory.id], 24, 200)).toEqual([]);
+  } finally { store.close(); }
+});
+
 test('uses revision-aware topics and memberships, bounded reads, and survives reopen', () => {
   const dir = mkdtempSync(join(tmpdir(), 'moki-memory-graph-'));
   const path = join(dir, 'archive.sqlite');
@@ -207,4 +233,51 @@ test('forget suppresses graph-only source revisions, while a later source can cr
     const newSource = source(store, conversationId, 'Connect the replacement fact explicitly.');
     expect(() => graph.createRelationship({ kind: 'related_to', subjectId: replacement.id, objectId: second.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'new explicit source', explicit: true, sourceMessageId: newSource.id, sourceRevision: newSource.revision! })).not.toThrow();
   } finally { store.close(); }
+});
+
+test('topic and entity merges preserve canonical routing and old-ID redirects after reopen', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'moki-memory-merge-'));
+  const path = join(dir, 'archive.sqlite');
+  const topicAliasId = crypto.randomUUID();
+  const topicCanonicalId = crypto.randomUUID();
+  const entityAliasId = crypto.randomUUID();
+  const entityCanonicalId = crypto.randomUUID();
+  let relationship = '';
+  let involvesRelationship = '';
+  const tripEntityId = crypto.randomUUID();
+  const first = new Store(path);
+  try {
+    const graph = first.memoryGraphRepository;
+    const conversationId = conversation(first);
+    const relationshipSource = source(first, conversationId, 'Alex is the same person as Alexander.');
+    const item = memory(first, memoryId, 'Alexander needs step-free access.');
+    const topicAlias = graph.createTopic({ id: topicAliasId, label: 'Access needs' });
+    const topicCanonical = graph.createTopic({ id: topicCanonicalId, label: 'Accessibility' });
+    graph.addMemoryTopic({ memoryId: item.id, topicId: topicAlias.id, expectedMemoryRevision: 1, expectedTopicRevision: 1 });
+    graph.mergeTopic(topicAlias.id, 1, topicCanonical.id, 1);
+    expect(graph.getTopic(topicAlias.id)?.id).toBe(topicCanonical.id);
+    expect(graph.memoriesForTopic(topicAlias.id)).toEqual([item.id]);
+    expect(() => graph.mergeTopic(topicAlias.id, 1, topicCanonical.id, 1)).toThrow('two identities');
+
+    const entityAlias = graph.createEntity({ id: entityAliasId, kind: 'person', label: 'Alex' });
+    const entityCanonical = graph.createEntity({ id: entityCanonicalId, kind: 'person', label: 'Alexander' });
+    const trip = graph.createEntity({ id: tripEntityId, kind: 'trip', label: 'Lisbon trip' });
+    relationship = graph.createRelationship({ kind: 'about', subjectId: item.id, objectId: entityAlias.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'user statement', explicit: true, sourceMessageId: relationshipSource.id, sourceRevision: relationshipSource.revision! }).id;
+    involvesRelationship = graph.createRelationship({ kind: 'involves', subjectId: trip.id, objectId: entityAlias.id, expectedSubjectRevision: 1, expectedObjectRevision: 1, provenance: 'user statement', explicit: true, sourceMessageId: relationshipSource.id, sourceRevision: relationshipSource.revision! }).id;
+    graph.mergeEntity(entityAlias.id, 1, entityCanonical.id, 1);
+    expect(graph.getEntity(entityAlias.id)?.id).toBe(entityCanonical.id);
+    expect(graph.getRelationship(relationship)).toMatchObject({ objectId: entityCanonical.id, objectRevision: 1, valid: true });
+    expect(graph.listRelationships({ endpointId: entityAlias.id }).map((item) => item.id)).toEqual(expect.arrayContaining([relationship, involvesRelationship]));
+    expect(graph.expandEntityIds([entityAlias.id])).toEqual([entityCanonical.id, trip.id]);
+  } finally { first.close(); }
+  try {
+    const reopened = new Store(path);
+    try {
+      expect(reopened.memoryGraphRepository.getTopic(topicAliasId)?.id).toBe(topicCanonicalId);
+      expect(reopened.memoryGraphRepository.getEntity(entityAliasId)?.id).toBe(entityCanonicalId);
+      expect(reopened.memoryGraphRepository.getRelationship(relationship)).toMatchObject({ objectId: entityCanonicalId, valid: true });
+      expect(reopened.memoryGraphRepository.listRelationships({ endpointId: entityAliasId }).map((item) => item.id)).toEqual(expect.arrayContaining([relationship, involvesRelationship]));
+      expect(reopened.memoryGraphRepository.expandEntityIds([entityAliasId])).toEqual([entityCanonicalId, tripEntityId]);
+    } finally { reopened.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

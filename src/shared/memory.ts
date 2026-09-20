@@ -1,6 +1,7 @@
 export type MemoryKind = 'fact' | 'preference' | 'note';
 export type MemoryState = 'active' | 'superseded' | 'contested';
 export type MemoryEvidenceStance = 'supporting' | 'contradicting';
+export type MemoryEvidenceModality = 'assertion' | 'quotation' | 'hypothetical' | 'intention' | 'uncertainty' | 'third_party';
 
 export type MemoryRecallMode = 'basic' | 'jev';
 
@@ -47,6 +48,7 @@ export interface MemoryEvidence {
   sourceCreatedAt: number | null;
   sourceRole: 'user' | 'assistant';
   stance: MemoryEvidenceStance;
+  modality: MemoryEvidenceModality;
   provenance: string;
   recordedAt: number;
   valid: boolean;
@@ -100,6 +102,15 @@ export interface MemoryRecallInspection {
   selected: MemoryRecallSelection[];
   candidateCount: number;
   descriptorCount: number;
+  descriptorAvailableCount?: number;
+  descriptorsTruncated?: boolean;
+  selectedDescriptorCount?: number;
+  topicSeedCount?: number;
+  entitySeedCount?: number;
+  lexicalSeedCount?: number;
+  expandedEntityCount?: number;
+  expandedMemoryCount?: number;
+  fallbackReason?: string;
   relationshipCount: number;
   elapsedMs: number;
 }

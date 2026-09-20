@@ -35,9 +35,10 @@
     "id": "contradiction",
     "request": "What is Alex's seat preference?",
     "recent": "",
-    "selectedDescriptors": ["Alex"],
+    "selectedDescriptors": [],
     "expected": [],
-    "forbidden": ["Alex aisle preference", "Alex window preference"]
+    "forbidden": ["Alex aisle preference", "Alex window preference"],
+    "expectedRequests": 0
   },
   {
     "id": "implicit-follow-up",
@@ -46,5 +47,70 @@
     "selectedDescriptors": ["Lisbon trip"],
     "expected": ["Alex accessibility"],
     "forbidden": ["Tokyo packing"]
+  },
+  {
+    "id": "descriptor-overflow",
+    "request": "Find the needle descriptor.",
+    "recent": "",
+    "selectedDescriptors": ["zzzz needle descriptor"],
+    "expected": ["Needle descriptor memory"],
+    "forbidden": []
+  },
+  {
+    "id": "category-overflow",
+    "request": "Find the needle in the large category.",
+    "recent": "",
+    "selectedDescriptors": ["Large category"],
+    "expected": ["Category needle"],
+    "forbidden": [],
+    "allowUnexpected": true
+  },
+  {
+    "id": "expired-graph",
+    "request": "Lisbon itinerary",
+    "recent": "",
+    "selectedDescriptors": ["Lisbon trip"],
+    "expected": ["Alex current need"],
+    "forbidden": ["Sam expired need"]
+  },
+  {
+    "id": "no-label-lexical",
+    "request": "Where does the orchid belong?",
+    "recent": "",
+    "selectedDescriptors": [],
+    "expected": ["Orchid placement"],
+    "forbidden": []
+  },
+  {
+    "id": "duplicate-labels",
+    "request": "When is Project Atlas due?",
+    "recent": "",
+    "selectedDescriptors": ["Project Atlas"],
+    "expected": ["Atlas deadline"],
+    "forbidden": []
+  },
+  {
+    "id": "multilingual-punctuation",
+    "request": "What is scheduled in Sao-Paulo?",
+    "recent": "",
+    "selectedDescriptors": ["São Paulo"],
+    "expected": ["São Paulo note"],
+    "forbidden": []
+  },
+  {
+    "id": "competing-budget",
+    "request": "List the Budget project facts.",
+    "recent": "",
+    "selectedDescriptors": ["Budget project"],
+    "expected": ["Budget fact 0", "Budget fact 1", "Budget fact 2", "Budget fact 3", "Budget fact 4", "Budget fact 5", "Budget fact 6", "Budget fact 7"],
+    "forbidden": ["Budget fact 8", "Budget fact 9"]
+  },
+  {
+    "id": "timeout-fallback",
+    "request": "Where is the cobalt folder?",
+    "recent": "",
+    "selectedDescriptors": [],
+    "expected": ["Cobalt fallback"],
+    "forbidden": []
   }
 ]

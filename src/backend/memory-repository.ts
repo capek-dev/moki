@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite';
 export type MemoryKind = 'fact' | 'preference' | 'note';
 export type MemoryState = 'active' | 'superseded' | 'contested';
 export type EvidenceStance = 'supporting' | 'contradicting';
+export type EvidenceModality = 'assertion' | 'quotation' | 'hypothetical' | 'intention' | 'uncertainty' | 'third_party';
 export type EvidenceInvalidReason = 'source_deleted' | 'source_revised' | 'source_streaming' | 'conversation_excluded' | 'memory_revised' | 'memory_revision_unknown';
 
 export interface MemoryRecord {
@@ -49,6 +50,7 @@ export interface SourceEvidence {
   sourceCreatedAt: number | null;
   sourceRole: 'user' | 'assistant';
   stance: EvidenceStance;
+  modality: EvidenceModality;
   provenance: string;
   recordedAt: number;
   valid: boolean;
@@ -62,6 +64,7 @@ export interface AddEvidenceInput {
   sourceMessageId: string;
   sourceRevision: number;
   stance: EvidenceStance;
+  modality?: EvidenceModality;
   provenance: string;
   recordedAt?: number;
 }
@@ -108,6 +111,18 @@ export interface BasicRecallCandidate {
   /** Time the extractor recorded the evidence, retained as attribution only. */
   extractionRecordedAt: number | null;
   sourceProvenance: string | null;
+  sourceModality: EvidenceModality | null;
+}
+
+export interface JevSeedMemory {
+  memoryId: string;
+  score: number;
+  explicitTopicMatches: number;
+  categoryMatches: number;
+  entityMatches: number;
+  lexicalMatches: number;
+  lastSupportedAt: number | null;
+  routeKeys: string[];
 }
 
 type MemoryRow = Omit<MemoryRecord, 'pinned' | 'core'> & { pinned: number; core: number };
@@ -129,6 +144,7 @@ type RecallRow = MemoryRow & {
   sourceRowid: number | null;
   extractionRecordedAt: number | null;
   sourceProvenance: string | null;
+  sourceModality: EvidenceModality | null;
   hasValidUserSupport: number;
 };
 
@@ -136,6 +152,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const KINDS: readonly MemoryKind[] = ['fact', 'preference', 'note'];
 const STATES: readonly MemoryState[] = ['active', 'superseded', 'contested'];
 const STANCES: readonly EvidenceStance[] = ['supporting', 'contradicting'];
+const MODALITIES: readonly EvidenceModality[] = ['assertion', 'quotation', 'hypothetical', 'intention', 'uncertainty', 'third_party'];
 const MAX_MEMORY_TEXT = 16000;
 const MAX_PROVENANCE = 200;
 const MAX_MEMORY_SEARCH_QUERY = 500;
@@ -173,6 +190,7 @@ export function installMemorySchema(db: Database) {
       sourceRevision INTEGER NOT NULL CHECK (sourceRevision >= 1),
       sourceRole TEXT NOT NULL CHECK (sourceRole IN ('user', 'assistant')),
       stance TEXT NOT NULL CHECK (stance IN ('supporting', 'contradicting')),
+      modality TEXT NOT NULL DEFAULT 'assertion' CHECK (modality IN ('assertion', 'quotation', 'hypothetical', 'intention', 'uncertainty', 'third_party')),
       provenance TEXT NOT NULL,
       recordedAt INTEGER NOT NULL,
       UNIQUE (memoryId, sourceMessageId, sourceRevision, stance, memoryRevision)
@@ -199,6 +217,7 @@ export function installMemorySchema(db: Database) {
   // from the current memory row.
   const columns = db.query<{ name: string }, []>('PRAGMA table_info(memory_evidence)').all();
   if (!columns.some((column) => column.name === 'memoryRevision')) db.exec('ALTER TABLE memory_evidence ADD COLUMN memoryRevision INTEGER');
+  if (!columns.some((column) => column.name === 'modality')) db.exec("ALTER TABLE memory_evidence ADD COLUMN modality TEXT NOT NULL DEFAULT 'assertion' CHECK (modality IN ('assertion', 'quotation', 'hypothetical', 'intention', 'uncertainty', 'third_party'))");
   ensureEvidenceRevisionUnique(db);
 }
 
@@ -218,12 +237,13 @@ function ensureEvidenceRevisionUnique(db: Database) {
       sourceRevision INTEGER NOT NULL CHECK (sourceRevision >= 1),
       sourceRole TEXT NOT NULL CHECK (sourceRole IN ('user', 'assistant')),
       stance TEXT NOT NULL CHECK (stance IN ('supporting', 'contradicting')),
+      modality TEXT NOT NULL DEFAULT 'assertion' CHECK (modality IN ('assertion', 'quotation', 'hypothetical', 'intention', 'uncertainty', 'third_party')),
       provenance TEXT NOT NULL,
       recordedAt INTEGER NOT NULL,
       UNIQUE (memoryId, sourceMessageId, sourceRevision, stance, memoryRevision)
     );
-    INSERT INTO memory_evidence_revision_upgrade (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, provenance, recordedAt)
-      SELECT id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, provenance, recordedAt FROM memory_evidence;
+    INSERT INTO memory_evidence_revision_upgrade (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, modality, provenance, recordedAt)
+      SELECT id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, modality, provenance, recordedAt FROM memory_evidence;
     DROP TABLE memory_evidence;
     ALTER TABLE memory_evidence_revision_upgrade RENAME TO memory_evidence;
     CREATE INDEX memory_evidence_memory_idx ON memory_evidence (memoryId, recordedAt, id);
@@ -277,7 +297,7 @@ function evidenceValidity(row: EvidenceRow): Pick<SourceEvidence, 'valid' | 'inv
 }
 
 function decodeEvidence(row: EvidenceRow): SourceEvidence {
-  return { id: row.id, memoryId: row.memoryId, memoryRevision: row.memoryRevision, sourceMessageId: row.sourceMessageId, sourceRevision: row.sourceRevision, sourceCreatedAt: row.sourceCreatedAt, sourceRole: row.sourceRole, stance: row.stance, provenance: row.provenance, recordedAt: row.recordedAt, ...evidenceValidity(row) };
+  return { id: row.id, memoryId: row.memoryId, memoryRevision: row.memoryRevision, sourceMessageId: row.sourceMessageId, sourceRevision: row.sourceRevision, sourceCreatedAt: row.sourceCreatedAt, sourceRole: row.sourceRole, stance: row.stance, modality: row.modality, provenance: row.provenance, recordedAt: row.recordedAt, ...evidenceValidity(row) };
 }
 
 export class MemoryRepository {
@@ -322,7 +342,7 @@ export class MemoryRepository {
    * is eligible without support only when no evidence row has ever been attached,
    * because stale evidence must not silently become a manual fallback.
    */
-  listBasicRecallCandidates(options: { applicableAt?: number; limit?: number; ids?: readonly string[] } = {}): BasicRecallCandidate[] {
+  listBasicRecallCandidates(options: { applicableAt?: number; limit?: number; ids?: readonly string[]; priorityOnly?: boolean } = {}): BasicRecallCandidate[] {
     const at = options.applicableAt === undefined ? Date.now() : timestamp(options.applicableAt, 'applicableAt')!;
     const limit = options.limit === undefined ? 50 : options.limit;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid recall candidate limit.');
@@ -330,6 +350,7 @@ export class MemoryRepository {
     const idFilter = ids.length ? `m.id IN (${ids.map(() => '?').join(',')})` : '1 = 1';
     const validSupport = `
       e.memoryId = m.id AND e.memoryRevision = m.revision AND e.stance = 'supporting'
+      AND e.modality NOT IN ('quotation', 'hypothetical')
       AND e.sourceRole = 'user'
       AND EXISTS (
         SELECT 1 FROM messages supportSource
@@ -341,6 +362,7 @@ export class MemoryRepository {
       )`;
     const validContradiction = `
       e.memoryId = m.id AND e.memoryRevision = m.revision AND e.stance = 'contradicting'
+      AND e.modality NOT IN ('quotation', 'hypothetical')
       AND e.sourceRole = 'user'
       AND EXISTS (
         SELECT 1 FROM messages contradictionSource
@@ -390,10 +412,15 @@ export class MemoryRepository {
          FROM memory_evidence e JOIN messages supportSource ON supportSource.id = e.sourceMessageId
          WHERE ${validSupport}
          ORDER BY (supportSource.createdAt IS NULL) ASC, supportSource.createdAt DESC, supportSource.rowid DESC, e.recordedAt DESC, e.id ASC LIMIT 1) AS sourceProvenance,
+        (SELECT e.modality
+         FROM memory_evidence e JOIN messages supportSource ON supportSource.id = e.sourceMessageId
+         WHERE ${validSupport}
+         ORDER BY (supportSource.createdAt IS NULL) ASC, supportSource.createdAt DESC, supportSource.rowid DESC, e.recordedAt DESC, e.id ASC LIMIT 1) AS sourceModality,
         EXISTS (SELECT 1 FROM memory_evidence e WHERE ${validSupport}) AS hasValidUserSupport
       FROM memories m
        WHERE m.state = 'active'
          AND (${idFilter})
+         AND (${options.priorityOnly ? '(m.core = 1 OR m.pinned = 1)' : '1 = 1'})
         AND (m.validFrom IS NULL OR m.validFrom <= ?)
         AND (m.validUntil IS NULL OR ? < m.validUntil)
         AND NOT EXISTS (SELECT 1 FROM memory_evidence e WHERE ${validContradiction})
@@ -419,42 +446,93 @@ export class MemoryRepository {
       sourceCreatedAt: row.sourceCreatedAt,
       extractionRecordedAt: row.extractionRecordedAt,
       sourceProvenance: row.sourceProvenance,
+      sourceModality: row.sourceModality,
     }));
   }
 
-  /** Return bounded lexical/topic/entity seeds without reading memory text into the host first. */
-  listJevSeedMemoryIds(options: { topicIds?: readonly string[]; entityIds?: readonly string[]; lexicalTerms?: readonly string[]; limit?: number }): string[] {
+  /** Rank only recall-eligible lexical/topic/entity seeds before truncation. */
+  listJevSeedMemories(options: { topicIds?: readonly string[]; entityIds?: readonly string[]; lexicalTerms?: readonly string[]; applicableAt?: number; limit?: number }): JevSeedMemory[] {
     const limit = options.limit === undefined ? 80 : options.limit;
-    const branchLimit = Math.min(120, Math.max(limit, 1));
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 120) throw new Error('Invalid Jev seed limit.');
-    const topicIds = options.topicIds?.map((id) => stableId(id, 'topic id')).slice(0, 64) ?? [];
-    const entityIds = options.entityIds?.map((id) => stableId(id, 'entity id')).slice(0, 64) ?? [];
-    const terms = options.lexicalTerms?.filter((term) => typeof term === 'string' && term.length > 1).slice(0, 16) ?? [];
-    const unions: string[] = [];
-    const params: (string | number)[] = [];
+    const at = options.applicableAt === undefined ? Date.now() : timestamp(options.applicableAt, 'applicableAt')!;
+    const topicIds = [...new Set(options.topicIds?.map((id) => stableId(id, 'topic id')).slice(0, 64) ?? [])];
+    const entityIds = [...new Set(options.entityIds?.map((id) => stableId(id, 'entity id')).slice(0, 64) ?? [])];
+    const terms = [...new Set(options.lexicalTerms?.map((term) => term.normalize('NFKC').toLocaleLowerCase()).filter((term) => term.length > 1).slice(0, 16) ?? [])];
+    const branches: string[] = [];
+    const params: (string | number)[] = [at];
     if (topicIds.length) {
       const placeholders = topicIds.map(() => '?').join(',');
-      unions.push(`SELECT id FROM (SELECT mt.memoryId AS id FROM memory_topics mt WHERE mt.topicId IN (${placeholders}) ORDER BY mt.memoryId LIMIT ?)`);
-      params.push(...topicIds, branchLimit);
-      unions.push(`SELECT id FROM (SELECT c.memoryId AS id FROM memory_routing_categories c JOIN memories m ON m.id = c.memoryId AND m.revision = c.memoryRevision WHERE c.topicId IN (${placeholders}) ORDER BY c.memoryId LIMIT ?)`);
-      params.push(...topicIds, branchLimit);
+      branches.push(`SELECT mt.memoryId AS memoryId, 1 AS explicitTopicMatches, 0 AS categoryMatches, 0 AS entityMatches, 0 AS lexicalMatches, 'topic:' || mt.topicId AS routeKey FROM memory_topics mt WHERE mt.topicId IN (${placeholders})`);
+      params.push(...topicIds);
+      branches.push(`SELECT c.memoryId AS memoryId, 0 AS explicitTopicMatches, 1 AS categoryMatches, 0 AS entityMatches, 0 AS lexicalMatches, 'topic:' || c.topicId AS routeKey FROM memory_routing_categories c JOIN memories currentMemory ON currentMemory.id = c.memoryId AND currentMemory.revision = c.memoryRevision WHERE c.topicId IN (${placeholders})`);
+      params.push(...topicIds);
     }
     if (entityIds.length) {
       const placeholders = entityIds.map(() => '?').join(',');
-      unions.push(`SELECT id FROM (SELECT r.subjectId AS id FROM memory_relationships r WHERE r.kind = 'about' AND r.objectId IN (${placeholders})
-        AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user'
-        AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
-        AND EXISTS (SELECT 1 FROM memories subjectMemory WHERE subjectMemory.id = r.subjectId AND subjectMemory.revision = r.subjectRevision)
-        AND EXISTS (SELECT 1 FROM entities objectEntity WHERE objectEntity.id = r.objectId AND objectEntity.revision = r.objectRevision)
-        ORDER BY r.subjectId LIMIT ?)`);
-      params.push(...entityIds, branchLimit);
+      branches.push(`SELECT r.subjectId AS memoryId, 0 AS explicitTopicMatches, 0 AS categoryMatches, 1 AS entityMatches, 0 AS lexicalMatches, 'entity:' || r.objectId AS routeKey FROM memory_relationships r
+        WHERE r.kind = 'about' AND r.objectId IN (${placeholders}) AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user'
+          AND (r.validFrom IS NULL OR r.validFrom <= (SELECT at FROM clock)) AND (r.validUntil IS NULL OR (SELECT at FROM clock) < r.validUntil)
+          AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
+          AND EXISTS (SELECT 1 FROM memories subjectMemory WHERE subjectMemory.id = r.subjectId AND subjectMemory.revision = r.subjectRevision)
+          AND EXISTS (SELECT 1 FROM entities objectEntity WHERE objectEntity.id = r.objectId AND objectEntity.revision = r.objectRevision)`);
+      params.push(...entityIds);
     }
     for (const term of terms) {
-      unions.push('SELECT id FROM (SELECT m.id FROM memories m WHERE instr(lower(m.text), lower(?)) > 0 ORDER BY m.id LIMIT ?)');
-      params.push(term, branchLimit);
+      branches.push('SELECT m.id AS memoryId, 0 AS explicitTopicMatches, 0 AS categoryMatches, 0 AS entityMatches, 1 AS lexicalMatches, ? AS routeKey FROM memories m WHERE instr(lower(m.text), ?) > 0');
+      params.push(`lexical:${term}`, term);
     }
-    if (!unions.length) return [];
-    return this.db.query<{ id: string }, (string | number)[]>(`SELECT id FROM (${unions.join(' UNION ')}) WHERE id IN (SELECT id FROM memories) GROUP BY id ORDER BY id LIMIT ?`).all(...params, limit).map((row) => stableId(row.id, 'Jev seed memory id'));
+    if (!branches.length) return [];
+    type SeedRow = Omit<JevSeedMemory, 'score' | 'routeKeys'> & { routeKeysJson: string };
+    const rows = this.db.query<SeedRow, (string | number)[]>(`
+      WITH clock(at) AS (VALUES (?)), matches AS (${branches.join(' UNION ALL ')}), ranked AS (
+        SELECT matches.memoryId,
+          SUM(explicitTopicMatches) AS explicitTopicMatches,
+          SUM(categoryMatches) AS categoryMatches,
+          SUM(entityMatches) AS entityMatches,
+          SUM(lexicalMatches) AS lexicalMatches,
+          json_group_array(DISTINCT routeKey) AS routeKeysJson,
+          (SELECT MAX(s.createdAt) FROM memory_evidence e JOIN messages s ON s.id = e.sourceMessageId
+            WHERE e.memoryId = matches.memoryId AND e.memoryRevision = m.revision AND e.stance = 'supporting'
+              AND e.modality NOT IN ('quotation', 'hypothetical') AND e.sourceRole = 'user' AND s.role = 'user' AND s.revision = e.sourceRevision AND s.status <> 'streaming'
+              AND NOT (e.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId))) AS lastSupportedAt
+        FROM matches JOIN memories m ON m.id = matches.memoryId
+        WHERE m.state = 'active'
+          AND (m.validFrom IS NULL OR m.validFrom <= (SELECT at FROM clock))
+          AND (m.validUntil IS NULL OR (SELECT at FROM clock) < m.validUntil)
+          AND NOT EXISTS (SELECT 1 FROM memory_evidence e WHERE e.memoryId = m.id AND e.memoryRevision = m.revision AND e.stance = 'contradicting' AND e.modality NOT IN ('quotation', 'hypothetical')
+            AND e.sourceRole = 'user' AND EXISTS (SELECT 1 FROM messages s WHERE s.id = e.sourceMessageId AND s.role = 'user' AND s.revision = e.sourceRevision AND s.status <> 'streaming'
+              AND NOT (e.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId))))
+          AND NOT EXISTS (SELECT 1 FROM memory_relationships r WHERE r.kind = 'supersedes' AND r.explicit = 1 AND r.objectId = m.id
+            AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user' AND (r.validFrom IS NULL OR r.validFrom <= (SELECT at FROM clock)) AND (r.validUntil IS NULL OR (SELECT at FROM clock) < r.validUntil)
+            AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
+            AND EXISTS (SELECT 1 FROM memories sm WHERE sm.id = r.subjectId AND sm.revision = r.subjectRevision)
+            AND EXISTS (SELECT 1 FROM memories om WHERE om.id = r.objectId AND om.revision = r.objectRevision))
+          AND NOT EXISTS (SELECT 1 FROM memory_relationships r WHERE r.kind = 'contradicts' AND (r.subjectId = m.id OR r.objectId = m.id)
+            AND r.sourceMessageId IS NOT NULL AND r.sourceRole = 'user' AND (r.validFrom IS NULL OR r.validFrom <= (SELECT at FROM clock)) AND (r.validUntil IS NULL OR (SELECT at FROM clock) < r.validUntil)
+            AND EXISTS (SELECT 1 FROM messages s WHERE s.id = r.sourceMessageId AND s.role = 'user' AND s.revision = r.sourceRevision AND s.status <> 'streaming' AND NOT (r.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
+            AND EXISTS (SELECT 1 FROM memories sm WHERE sm.id = r.subjectId AND sm.revision = r.subjectRevision)
+            AND EXISTS (SELECT 1 FROM memories om WHERE om.id = r.objectId AND om.revision = r.objectRevision))
+          AND (EXISTS (SELECT 1 FROM memory_evidence e JOIN messages s ON s.id = e.sourceMessageId
+            WHERE e.memoryId = m.id AND e.memoryRevision = m.revision AND e.stance = 'supporting' AND e.modality NOT IN ('quotation', 'hypothetical') AND e.sourceRole = 'user'
+              AND s.role = 'user' AND s.revision = e.sourceRevision AND s.status <> 'streaming'
+              AND NOT (e.provenance = 'background learning' AND EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = s.conversationId)))
+            OR ((m.core = 1 OR m.pinned = 1) AND NOT EXISTS (SELECT 1 FROM memory_evidence e WHERE e.memoryId = m.id)))
+        GROUP BY matches.memoryId
+      )
+      SELECT * FROM ranked ORDER BY
+        CASE WHEN entityMatches > 0 AND explicitTopicMatches + categoryMatches > 0 THEN 0 WHEN entityMatches > 0 THEN 1 WHEN explicitTopicMatches > 0 THEN 2 WHEN categoryMatches > 0 THEN 3 ELSE 4 END,
+        lexicalMatches DESC, (lastSupportedAt IS NULL) ASC, lastSupportedAt DESC, memoryId ASC LIMIT ?`).all(...params, limit);
+    return rows.map((row) => {
+      const routeKeys = JSON.parse(row.routeKeysJson) as unknown;
+      if (!Array.isArray(routeKeys) || routeKeys.some((key) => typeof key !== 'string')) throw new Error('Invalid Jev seed routes.');
+      const { routeKeysJson: _routeKeysJson, ...seed } = row;
+      return { ...seed, routeKeys, memoryId: stableId(row.memoryId, 'Jev seed memory id'), score: row.entityMatches * 100 + row.explicitTopicMatches * 60 + row.categoryMatches * 40 + row.lexicalMatches * 5 };
+    });
+  }
+
+  /** Compatibility wrapper for callers that only need ranked IDs. */
+  listJevSeedMemoryIds(options: { topicIds?: readonly string[]; entityIds?: readonly string[]; lexicalTerms?: readonly string[]; applicableAt?: number; limit?: number }): string[] {
+    return this.listJevSeedMemories(options).map((seed) => seed.memoryId);
   }
 
   list(options: MemoryListOptions = {}): MemoryRecord[] {
@@ -707,6 +785,7 @@ export class MemoryRepository {
     const expectedMemoryRevision = this.requireRevision(input.expectedMemoryRevision, 'memory revision');
     const sourceRevision = this.requireRevision(input.sourceRevision, 'source revision');
     const stance = choice(input.stance, STANCES, 'evidence stance');
+    const modality = input.modality === undefined ? 'assertion' : choice(input.modality, MODALITIES, 'evidence modality');
     const provenance = boundedText(input.provenance, 'evidence provenance', MAX_PROVENANCE);
     const recordedAt = input.recordedAt === undefined ? Date.now() : timestamp(input.recordedAt, 'recordedAt')!;
     let evidence: SourceEvidence | null = null;
@@ -721,7 +800,7 @@ export class MemoryRepository {
       this.assertSourceNotSuppressed(sourceMessageId, sourceRevision);
       const duplicate = this.db.query('SELECT 1 FROM memory_evidence WHERE memoryId = ? AND memoryRevision = ? AND sourceMessageId = ? AND sourceRevision = ? AND stance = ? LIMIT 1').get(memoryId, expectedMemoryRevision, sourceMessageId, sourceRevision, stance);
       if (duplicate) throw new Error('Duplicate source evidence.');
-      this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, provenance, recordedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, memoryId, expectedMemoryRevision, sourceMessageId, sourceRevision, source.role, stance, provenance, recordedAt);
+      this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, modality, provenance, recordedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, memoryId, expectedMemoryRevision, sourceMessageId, sourceRevision, source.role, stance, modality, provenance, recordedAt);
       evidence = this.getEvidence(id);
     })();
     this.onMutation();
@@ -774,7 +853,7 @@ export class MemoryRepository {
   }
 
   private evidenceQuery(where: string) {
-    return this.db.query<EvidenceRow, (string | number)[]>(`SELECT e.id, e.memoryId, e.memoryRevision, e.sourceMessageId, e.sourceRevision, m.createdAt AS sourceCreatedAt, e.sourceRole, e.stance, e.provenance, e.recordedAt, mem.id AS memoryExists, mem.revision AS currentMemoryRevision, m.id AS sourceExists, m.revision AS currentSourceRevision, m.status AS sourceStatus, m.conversationId AS sourceConversationId, CASE WHEN EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = m.conversationId) THEN 1 ELSE 0 END AS sourceExcluded FROM memory_evidence e LEFT JOIN memories mem ON mem.id = e.memoryId LEFT JOIN messages m ON m.id = e.sourceMessageId WHERE ${where} ORDER BY e.recordedAt, e.id`);
+    return this.db.query<EvidenceRow, (string | number)[]>(`SELECT e.id, e.memoryId, e.memoryRevision, e.sourceMessageId, e.sourceRevision, m.createdAt AS sourceCreatedAt, e.sourceRole, e.stance, e.modality, e.provenance, e.recordedAt, mem.id AS memoryExists, mem.revision AS currentMemoryRevision, m.id AS sourceExists, m.revision AS currentSourceRevision, m.status AS sourceStatus, m.conversationId AS sourceConversationId, CASE WHEN EXISTS (SELECT 1 FROM learning_exclusions le WHERE le.conversationId = m.conversationId) THEN 1 ELSE 0 END AS sourceExcluded FROM memory_evidence e LEFT JOIN memories mem ON mem.id = e.memoryId LEFT JOIN messages m ON m.id = e.sourceMessageId WHERE ${where} ORDER BY e.recordedAt, e.id`);
   }
 
   private listLimit(value: unknown): number {

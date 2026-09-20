@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { categorizeMemory, normalizeMemoryTopics } from '@backend/memory-categories';
 import type { Database } from 'bun:sqlite';
 import type { Credentials, Generate } from '@backend/chat';
-import type { MemoryKind, MemoryRepository } from '@backend/memory-repository';
+import type { EvidenceModality, MemoryKind, MemoryRepository } from '@backend/memory-repository';
 import { MemoryGraphRepository, type EntityKind, type RelationshipKind } from '@backend/memory-graph-repository';
 import { assertSourceEvidenceAllowed } from '@backend/memory-repository';
 import { defaultModel, requireModel } from '@shared/models';
@@ -20,14 +20,15 @@ export const LEARNING_INSPECTOR_PAGE_MAX = 50;
 export const LEARNING_INSPECTOR_OFFSET_MAX = 10_000;
 export const LEARNING_DISPATCH_TIMEOUT_MS = 90_000;
 export const LEARNING_RUN_DETAIL_MAX_BYTES = 48_000;
+const EVIDENCE_MODALITIES: readonly EvidenceModality[] = ['assertion', 'quotation', 'hypothetical', 'intention', 'uncertainty', 'third_party'];
 
 export type LearningProvider = 'deepseek' | 'codex';
 export type LearningRunStatus = 'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
 export type LearningProposalStatus = 'pending' | 'applied' | 'rejected' | 'suppressed' | 'stale';
 export type LearningProposal =
-  | { kind: 'memory'; action: 'add'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; text: string; memoryKind: MemoryKind; topics?: string[] }
-  | { kind: 'memory'; action: 'confirm'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; memoryId: string; expectedMemoryRevision: number }
-  | { kind: 'memory'; action: 'correct'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; memoryId: string; expectedMemoryRevision: number; text: string; memoryKind?: MemoryKind; topics?: string[] }
+  | { kind: 'memory'; action: 'add'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; text: string; memoryKind: MemoryKind; modality?: EvidenceModality; topics?: string[] }
+  | { kind: 'memory'; action: 'confirm'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; memoryId: string; expectedMemoryRevision: number; modality?: EvidenceModality }
+  | { kind: 'memory'; action: 'correct'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; memoryId: string; expectedMemoryRevision: number; text: string; memoryKind?: MemoryKind; modality?: EvidenceModality; topics?: string[] }
   | { kind: 'topic'; action: 'create'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; label: string; description?: string | null; memoryId?: string; expectedMemoryRevision?: number }
   | { kind: 'entity'; action: 'create'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; entityKind: EntityKind; label: string; description?: string | null; memoryId?: string; expectedMemoryRevision?: number }
   | { kind: 'relationship'; action: 'create'; sourceMessageId: string; sourceRevision: number; sourceRole: 'user'; relationshipKind: RelationshipKind; subjectId: string; objectId: string; expectedSubjectRevision: number; expectedObjectRevision: number; provenance?: string };
@@ -843,7 +844,7 @@ export class MemoryLearningRepository {
       const existing = this.db.query<MemoryRow, [string]>('SELECT * FROM memories WHERE id = ?').get(id);
       if (existing) return;
       this.db.query('INSERT INTO memories (id, text, kind, state, pinned, core, recordedAt, revision) VALUES (?, ?, ?, \'active\', 0, 0, ?, 1)').run(id, proposal.text, proposal.memoryKind, now);
-      this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, provenance, recordedAt) VALUES (?, ?, 1, ?, ?, \'user\', \'supporting\', ?, ?)').run(crypto.randomUUID(), id, proposal.sourceMessageId, proposal.sourceRevision, 'background learning', now);
+      this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, modality, provenance, recordedAt) VALUES (?, ?, 1, ?, ?, \'user\', \'supporting\', ?, ?, ?)').run(crypto.randomUUID(), id, proposal.sourceMessageId, proposal.sourceRevision, proposal.modality ?? 'assertion', 'background learning', now);
       categorizeMemory(this.db, id, proposal.topics);
       const after = this.db.query<MemoryRow, [string]>('SELECT * FROM memories WHERE id = ?').get(id)!;
       this.recordHistory(runId, proposal.operationId, 'memory', id, 'add', null, after, now);
@@ -855,11 +856,12 @@ export class MemoryLearningRepository {
     if (current.revision !== proposal.expectedMemoryRevision) throw new Error('Memory revision conflict.');
     if (proposal.action === 'confirm') {
       const duplicate = this.db.query('SELECT 1 FROM memory_evidence WHERE memoryId = ? AND memoryRevision = ? AND sourceMessageId = ? AND sourceRevision = ? AND stance = \'supporting\'').get(id, current.revision, proposal.sourceMessageId, proposal.sourceRevision);
-      if (!duplicate) this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, provenance, recordedAt) VALUES (?, ?, ?, ?, ?, \'user\', \'supporting\', \'background learning\', ?)').run(crypto.randomUUID(), id, current.revision, proposal.sourceMessageId, proposal.sourceRevision, now);
+      if (!duplicate) this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, modality, provenance, recordedAt) VALUES (?, ?, ?, ?, ?, \'user\', \'supporting\', ?, \'background learning\', ?)').run(crypto.randomUUID(), id, current.revision, proposal.sourceMessageId, proposal.sourceRevision, proposal.modality ?? 'assertion', now);
       return;
     }
     const before = { ...current };
     this.db.query('UPDATE memories SET text = ?, kind = ?, revision = revision + 1 WHERE id = ? AND revision = ?').run(proposal.text, proposal.memoryKind ?? current.kind, id, current.revision);
+    this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, modality, provenance, recordedAt) VALUES (?, ?, ?, ?, ?, \'user\', \'supporting\', ?, \'background learning\', ?)').run(crypto.randomUUID(), id, current.revision + 1, proposal.sourceMessageId, proposal.sourceRevision, proposal.modality ?? 'assertion', now);
     categorizeMemory(this.db, id, proposal.topics);
     const after = this.db.query<MemoryRow, [string]>('SELECT * FROM memories WHERE id = ?').get(id)!;
     this.recordHistory(runId, proposal.operationId, 'memory', id, 'correct', before, after, now);
@@ -930,20 +932,20 @@ function normalizeProposal(value: LearningProposal): LearningProposal {
   const source = proposalSource(value);
   if (value.kind === 'memory') {
     if (value.action === 'add') {
-      exactProposalFields(value as unknown as Record<string, unknown>, ['kind', 'action', 'sourceMessageId', 'sourceRevision', 'sourceRole', 'text', 'memoryKind', 'topics']);
+      exactProposalFields(value as unknown as Record<string, unknown>, ['kind', 'action', 'sourceMessageId', 'sourceRevision', 'sourceRole', 'text', 'memoryKind', 'modality', 'topics']);
       const topics = normalizeMemoryTopics(value.topics);
       value = { ...value, ...(topics === undefined ? {} : { topics }) };
-      return { ...value, ...source, text: bounded(value.text, 'memory text', MAX_TEXT), memoryKind: choice(value.memoryKind, MEMORY_KINDS, 'memory kind') };
+      return { ...value, ...source, text: bounded(value.text, 'memory text', MAX_TEXT), memoryKind: choice(value.memoryKind, MEMORY_KINDS, 'memory kind'), modality: choice(value.modality ?? 'assertion', EVIDENCE_MODALITIES, 'evidence modality') };
     }
     if (value.action === 'confirm') {
-      exactProposalFields(value as unknown as Record<string, unknown>, ['kind', 'action', 'sourceMessageId', 'sourceRevision', 'sourceRole', 'memoryId', 'expectedMemoryRevision']);
-      return { ...value, ...source, memoryId: requireUuid(value.memoryId, 'memory id'), expectedMemoryRevision: positive(value.expectedMemoryRevision, 'memory revision') };
+      exactProposalFields(value as unknown as Record<string, unknown>, ['kind', 'action', 'sourceMessageId', 'sourceRevision', 'sourceRole', 'memoryId', 'expectedMemoryRevision', 'modality']);
+      return { ...value, ...source, memoryId: requireUuid(value.memoryId, 'memory id'), expectedMemoryRevision: positive(value.expectedMemoryRevision, 'memory revision'), modality: choice(value.modality ?? 'assertion', EVIDENCE_MODALITIES, 'evidence modality') };
     }
     if (value.action === 'correct') {
-      exactProposalFields(value as unknown as Record<string, unknown>, ['kind', 'action', 'sourceMessageId', 'sourceRevision', 'sourceRole', 'memoryId', 'expectedMemoryRevision', 'text', 'memoryKind', 'topics']);
+      exactProposalFields(value as unknown as Record<string, unknown>, ['kind', 'action', 'sourceMessageId', 'sourceRevision', 'sourceRole', 'memoryId', 'expectedMemoryRevision', 'text', 'memoryKind', 'modality', 'topics']);
       const topics = normalizeMemoryTopics(value.topics);
       value = { ...value, ...(topics === undefined ? {} : { topics }) };
-      return { ...value, ...source, memoryId: requireUuid(value.memoryId, 'memory id'), expectedMemoryRevision: positive(value.expectedMemoryRevision, 'memory revision'), text: bounded(value.text, 'memory text', MAX_TEXT), ...(value.memoryKind === undefined ? {} : { memoryKind: choice(value.memoryKind, MEMORY_KINDS, 'memory kind') }) };
+      return { ...value, ...source, memoryId: requireUuid(value.memoryId, 'memory id'), expectedMemoryRevision: positive(value.expectedMemoryRevision, 'memory revision'), text: bounded(value.text, 'memory text', MAX_TEXT), modality: choice(value.modality ?? 'assertion', EVIDENCE_MODALITIES, 'evidence modality'), ...(value.memoryKind === undefined ? {} : { memoryKind: choice(value.memoryKind, MEMORY_KINDS, 'memory kind') }) };
     }
   }
   if (value.kind === 'topic') {
@@ -1188,12 +1190,13 @@ Before returning, silently check: did I capture explicit identity, occupation, o
 
 CATEGORIZATION
 Every added or corrected memory must include topics: one to four short reusable topic labels, such as "personal identity", "software development", or "marketing and distribution". Choose labels that describe the actual memory, not the current question. Reuse supplied topic labels where appropriate. Avoid personal names, quotations, or detailed facts in labels. The application links these labels to the new memory atomically; do not invent IDs or emit separate topic proposals merely to categorize a new memory.
+Every memory proposal must include modality. Use "assertion" for a direct factual statement, "intention" for a stated plan or goal, "uncertainty" when the user explicitly qualifies certainty, and "third_party" for a claim about somebody else. Do not propose quotations or hypotheticals as memories; those enum values exist so manually reviewed evidence can remain structurally honest.
 
 OUTPUT CONTRACT
 Return JSON only, with exactly one top-level key, proposals, whose value is an array (not a bare array). Use memoryKind "fact" for identity, occupation, goals and stated circumstances; "preference" for explicit preferences; "note" for other supported context. Copy actual source and record revisions, not the illustrative number 1 below. No tools or explanatory prose. Every proposal must use exactly one of these shapes:
-{"kind":"memory","action":"add","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","text":"durable fact","memoryKind":"preference","topics":["marketing and distribution"]}
-{"kind":"memory","action":"confirm","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","memoryId":"<copy a supplied current memory id>","expectedMemoryRevision":1}
-{"kind":"memory","action":"correct","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","memoryId":"<copy a supplied current memory id>","expectedMemoryRevision":1,"text":"corrected fact","memoryKind":"fact","topics":["personal identity"]}
+{"kind":"memory","action":"add","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","text":"durable fact","memoryKind":"preference","modality":"assertion","topics":["marketing and distribution"]}
+{"kind":"memory","action":"confirm","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","memoryId":"<copy a supplied current memory id>","expectedMemoryRevision":1,"modality":"assertion"}
+{"kind":"memory","action":"correct","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","memoryId":"<copy a supplied current memory id>","expectedMemoryRevision":1,"text":"corrected fact","memoryKind":"fact","modality":"assertion","topics":["personal identity"]}
 {"kind":"topic","action":"create","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","label":"topic","description":null,"memoryId":"<copy a supplied current memory id>","expectedMemoryRevision":1}
 {"kind":"entity","action":"create","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","entityKind":"person","label":"entity","description":null,"memoryId":"<copy a supplied current memory id>","expectedMemoryRevision":1}
 {"kind":"relationship","action":"create","sourceMessageId":"<copy a supplied user message id>","sourceRevision":1,"sourceRole":"user","relationshipKind":"related_to","subjectId":"<copy a supplied current memory id>","objectId":"<copy a supplied current memory id>","expectedSubjectRevision":1,"expectedObjectRevision":1,"provenance":"short explanation"}
