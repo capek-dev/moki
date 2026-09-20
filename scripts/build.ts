@@ -10,7 +10,7 @@ async function bundle(options: Parameters<typeof Bun.build>[0]) {
 await mkdir(`${out}/electron`, { recursive: true });
 await mkdir(`${out}/electron/assets`, { recursive: true });
 await mkdir(`${out}/backend`, { recursive: true });
-await bundle({ entrypoints: ['src/electron/main.ts', 'src/electron/preload.ts'], outdir: `${out}/electron`, target: 'node', format: 'cjs', external: ['electron'], naming: '[name].cjs', sourcemap: development ? 'external' : 'none' });
+await bundle({ entrypoints: ['src/electron/main.ts', 'src/electron/preload.ts'], outdir: `${out}/electron`, target: 'node', format: 'cjs', external: ['electron', 'electron-updater'], naming: '[name].cjs', sourcemap: development ? 'external' : 'none' });
 await copyFile('assets/tray/mokiTemplate.png', `${out}/electron/assets/mokiTemplate.png`);
 await copyFile('assets/tray/mokiTemplate@2x.png', `${out}/electron/assets/mokiTemplate@2x.png`);
 if (development) {

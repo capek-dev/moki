@@ -3,6 +3,7 @@ import type { Assistant, Result, Snapshot } from '@shared/protocol';
 import { ProvidersSection } from '@renderer/components/settings/providers/providers-section';
 import { MemorySettings } from '@renderer/components/settings/memory-settings';
 import { ConnectionsSettings } from '@renderer/components/settings/connections-settings';
+import { UpdatesSettings } from '@renderer/components/settings/updates-settings';
 import { AppearancePreview } from '@renderer/components/settings/appearance-preview';
 import { INITIAL_APPEARANCE } from '@renderer/components/companion/companion';
 import { mokiAssistant } from '@renderer/lib/moki';
@@ -15,7 +16,7 @@ import { Panel } from '@renderer/components/ui/panel';
 import { Field, Textarea } from '@renderer/components/ui/field';
 import { SimpleSelect } from '@renderer/components/ui/select';
 
-const SECTIONS = ['Moki', 'Appearance', 'Providers', 'Memory', 'Integrations'] as const;
+const SECTIONS = ['Moki', 'Appearance', 'Providers', 'Memory', 'Integrations', 'Updates'] as const;
 const PROVIDER_LABELS = { deepseek: 'DeepSeek', codex: 'Codex subscription' } as const;
 
 /** Every tab opens the same way: one title, one line of context, then panels. */
@@ -113,6 +114,10 @@ export function Settings() {
         {section === 'Integrations' && <div className="grid gap-3">
           <TabHeader title="Integrations" description="Cua Driver plus the app connections that extend what Moki can do. You control every connection and action." />
           <ConnectionsSettings />
+        </div>}
+        {section === 'Updates' && <div className="grid gap-3">
+          <TabHeader title="Updates" description="Check GitHub Releases, download a signed update, and restart when you are ready." />
+          <UpdatesSettings />
         </div>}
       </div>
     </section>

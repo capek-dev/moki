@@ -20,6 +20,12 @@ const api: DesktopAPI = {
     ipcRenderer.on('moki:browser-extension-state', handler);
     return () => ipcRenderer.removeListener('moki:browser-extension-state', handler);
   },
+  updater: (command) => ipcRenderer.invoke('moki:updater', command),
+  onUpdater: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
+    ipcRenderer.on('moki:updater-state', handler);
+    return () => ipcRenderer.removeListener('moki:updater-state', handler);
+  },
   mcpAuth: (command) => ipcRenderer.invoke('moki:auth', command),
   speak: (text) => ipcRenderer.invoke('moki:speak', text),
   stopSpeaking: () => ipcRenderer.invoke('moki:stop-speaking'),

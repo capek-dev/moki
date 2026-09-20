@@ -42,6 +42,12 @@ test('preload strips Electron events and removes subscriptions', () => {
   ipc.emit('moki:browser-extension-state', { privileged: true }, { connected: true, url: 'http://127.0.0.1:8751' });
   expect(browser).toEqual([[{ connected: true, url: 'http://127.0.0.1:8751' }]]);
   stopBrowser(); expect(ipc.listenerCount('moki:browser-extension-state')).toBe(0);
+  const updates: unknown[] = [];
+  const stopUpdates = api.onUpdater((...args: unknown[]) => updates.push(args));
+  const updateState = { status: 'available', currentVersion: '0.1.0', availableVersion: '0.2.0', percent: null, message: null };
+  ipc.emit('moki:updater-state', { privileged: true }, updateState);
+  expect(updates).toEqual([[updateState]]);
+  stopUpdates(); expect(ipc.listenerCount('moki:updater-state')).toBe(0);
 });
 
 // Execute the actual bundle with a private Electron/process harness. No global
@@ -84,7 +90,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
     kill() {},
   });
   const app = Object.assign(new EventEmitter(), {
-    getAppPath: () => process.cwd(), requestSingleInstanceLock: () => true,
+    getAppPath: () => process.cwd(), getVersion: () => '0.1.0', requestSingleInstanceLock: () => true,
     whenReady: () => Promise.resolve(), getPath: () => '/unused', quit() {}, isPackaged: packaged,
     setName(name: string) { expect(name).toBe(appName); },
     setPath(key: string, value: string) { expect(key).toBe('userData'); expect(value).toBe('/unused/' + appName); },
@@ -98,7 +104,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
       safeStorage: {},
       ipcMain: { handle: (name: string, handler: any) => handlers.set(name, handler) },
       Menu: { buildFromTemplate: (value: any[]) => Object.assign(value, { popup() { value[0].click(); } }), setApplicationMenu: (value: any[]) => { menu = value; } },
-      dialog: { showErrorBox: (_title: string, message: string) => { throw new Error(message); } },
+      dialog: { showErrorBox: (_title: string, message: string) => { throw new Error(message); }, showMessageBox: async () => ({ response: 1 }) },
     },
     'node:path': path, 'node:url': url, 'node:readline': readline,
     'node:crypto': nodeCrypto, 'node:os': os, 'node:fs': {
@@ -129,6 +135,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(windows[0].webContents.devTools).toBe(development ? 1 : 0);
     expect(() => handlers.get('moki:providers')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
     expect(() => handlers.get('moki:tool-loading')!(event(windows[0]), { action: 'status' })).toThrow('only available in Settings');
+    await expect(handlers.get('moki:updater')!(event(windows[0]), 'status')).rejects.toThrow('only available in Settings');
      await expect(request(event(windows[0]), { method: 'cuaTools' })).rejects.toThrow('only available in Settings');
      await expect(request(event(windows[0]), { method: 'learningRuns' })).rejects.toThrow('only available in Settings');
      await expect(request(event(windows[0]), { method: 'learningRetry', runId: 'run' })).rejects.toThrow('only available in Settings');
@@ -144,6 +151,10 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(windows[1].options.webPreferences.sandbox).toBe(true);
     expect(handlers.get('moki:browser-extension')!(event(windows[1]))).toMatchObject({ connected: false, url: 'http://127.0.0.1:8751' });
     expect(handlers.get('moki:tool-loading')!(event(windows[1]), { action: 'status' })).toEqual({ enabled: false, maxDirect: 12, configured: false });
+    expect(await handlers.get('moki:updater')!(event(windows[1]), 'status')).toEqual({ status: 'disabled', currentVersion: '0.1.0', availableVersion: null, percent: null, message: 'Updates are available in signed release builds.' });
+    expect((await handlers.get('moki:updater')!(event(windows[1]), 'check')).status).toBe('disabled');
+    await expect(handlers.get('moki:updater')!(event(windows[1]), 'invalid')).rejects.toThrow('Invalid update command.');
+    await expect(handlers.get('moki:updater')!(event(windows[1]), 'install')).rejects.toThrow('No downloaded update is ready to install.');
     expect(windows[0].webContents.sent.at(-1).channel).toBe('moki:tool-loading-state');
     await handlers.get('moki:history')!(event(windows[0]));
     expect(windows).toHaveLength(3);

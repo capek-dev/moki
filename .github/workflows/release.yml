@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       publish:
-        description: Publish the signed and notarized DMG to GitHub Releases
+        description: Publish the signed and notarized app and update feed to GitHub Releases
         required: true
         default: false
         type: boolean
@@ -30,30 +30,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
 
-      - name: Validate version
+      - name: Pin release identity
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "cakep-dev/moki"
+          RELEASE_SHA=$(git rev-parse HEAD)
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
           PACKAGE_VERSION=$(bun -e "console.log(require('./package.json').version)")
           if [ "$REQUESTED_VERSION" != "$PACKAGE_VERSION" ]; then
             echo "Requested version $REQUESTED_VERSION does not match package.json version $PACKAGE_VERSION" >&2
             exit 1
           fi
+          echo "RELEASE_SHA=$RELEASE_SHA" >> "$GITHUB_ENV"
           echo "VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
           echo "TAG=app/v$PACKAGE_VERSION" >> "$GITHUB_ENV"
 
-      - name: Refuse an existing release
+      - name: Refuse an existing tag or release
         if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists. Bump package.json instead of overwriting it." >&2
+            exit 1
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists. Bump package.json instead of overwriting it." >&2
             exit 1
@@ -61,6 +70,12 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Typecheck and focused tests
+        run: |
+          set -euo pipefail
+          bun run typecheck
+          bun test tests/updater.test.ts tests/settings-window.test.ts
 
       - name: Import Apple certificate
         env:
@@ -79,7 +94,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN_PATH"
           rm -f "$CERT_PATH"
 
-      - name: Build, sign, and notarize DMG
+      - name: Build, sign, and notarize app
         env:
           CSC_KEYCHAIN: ${{ runner.temp }}/signing.keychain-db
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -90,22 +105,35 @@ jobs:
           IDENTITY=$(security find-identity -v -p codesigning "$CSC_KEYCHAIN" | grep "Developer ID Application" | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
           test -n "$IDENTITY"
           bun run build
-          ./node_modules/.bin/electron-builder --mac dmg --publish never \
+          ./node_modules/.bin/electron-builder --mac dmg zip --publish never \
             -c.mac.identity="$IDENTITY" \
             -c.mac.notarize=true
 
-      - name: Verify app and artifact
+      - name: Verify app and update feed
         run: |
           set -euo pipefail
           APP="release/mac-arm64/Moki.app"
           DMG="release/Moki-${VERSION}-arm64.dmg"
+          ZIP="release/Moki-${VERSION}-arm64-mac.zip"
+          FEED="release/latest-mac.yml"
+          APP_FEED="$APP/Contents/Resources/app-update.yml"
           test -d "$APP"
           test -f "$DMG"
+          test -f "$ZIP"
+          test -s "$FEED"
+          test -s "$APP_FEED"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'app.moki.desktop'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx "$VERSION"
+          grep -F 'provider: github' "$APP_FEED"
+          grep -F 'owner: cakep-dev' "$APP_FEED"
+          grep -F 'repo: moki' "$APP_FEED"
+          grep -F "version: $VERSION" "$FEED"
+          grep -F "Moki-${VERSION}-arm64-mac.zip" "$FEED"
           codesign --verify --deep --strict --verbose=2 "$APP"
           spctl --assess --type execute --verbose=2 "$APP"
           xcrun stapler validate "$APP"
           xcrun stapler validate "$DMG"
-          shasum -a 256 "$DMG" > "$DMG.sha256"
+          shasum -a 256 "$DMG" "$ZIP" "$FEED" > "release/Moki-${VERSION}-arm64.sha256"
 
       - name: Publish GitHub release
         if: inputs.publish
@@ -114,6 +142,9 @@ jobs:
         run: |
           set -euo pipefail
           DMG="release/Moki-${VERSION}-arm64.dmg"
+          ZIP="release/Moki-${VERSION}-arm64-mac.zip"
+          FEED="release/latest-mac.yml"
+          CHECKSUMS="release/Moki-${VERSION}-arm64.sha256"
           NOTES=()
           if [ -s "changelogs/app/v${VERSION}.md" ]; then
             NOTES=(--notes-file "changelogs/app/v${VERSION}.md")
@@ -125,12 +156,15 @@ jobs:
             PRERELEASE=(--prerelease)
           fi
           gh release create "$TAG" \
-            "$DMG" "$DMG.sha256" \
+            "$DMG" "$ZIP" "$FEED" "$CHECKSUMS" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
+            --target "$RELEASE_SHA" \
             --title "Moki $VERSION" \
             "${NOTES[@]}" \
             "${PRERELEASE[@]}"
+          for asset in "$(basename "$DMG")" "$(basename "$ZIP")" "$(basename "$FEED")" "$(basename "$CHECKSUMS")"; do
+            test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq ".assets[] | select(.name == \"$asset\") | .name")" = "$asset"
+          done
 
       - name: Cleanup keychain
         if: always()

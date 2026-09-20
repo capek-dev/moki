@@ -12,6 +12,8 @@ import { parseMcpConfig } from '@shared/mcp';
 import { pathToFileURL } from 'node:url';
 import { Runtime } from '@electron/runtime';
 import { BrowserExtensionHost } from '@electron/browser-extension-host';
+import { MokiUpdater } from '@electron/updater';
+import type { UpdaterCommand, UpdaterState } from '@shared/updater';
 import type { BrowserExtensionState } from '@shared/browser-extension';
 import { LearningReviewCache } from '@electron/learning-review-cache';
 import { requireThinking } from '@shared/models';
@@ -70,8 +72,10 @@ let browserExtension: BrowserExtensionHost | undefined;
 let capture: ScreenshotCapture | undefined;
 let speech: SpeechSynth | undefined;
 let dictation: DictationService | undefined;
+let updater: MokiUpdater | undefined;
 let quitting = false;
 let shutdownComplete = false;
+let installingUpdate = false;
 // macOS gets real window glass (vibrancy behind translucent panels); other
 // platforms fall back to a solid neutral page.
 const glassWindow = process.platform === 'darwin'
@@ -82,6 +86,9 @@ const glassWindow = process.platform === 'darwin'
 const appRoot = app.getAppPath();
 const page = join(appRoot, 'dist/renderer/index.html');
 function show() { window?.show(); window?.focus(); }
+function updaterChanged(state: UpdaterState) {
+  for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:updater-state', state);
+}
 function browserExtensionChanged(state: BrowserExtensionState) {
   for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:browser-extension-state', state);
   void runtime?.push({ event: 'browser-extension-state', state }).catch((error) => console.error('[moki] browser extension state push failed:', error instanceof Error ? error.message : String(error)));
@@ -181,6 +188,10 @@ else {
       ? join(process.resourcesPath, 'native/moki-dictate')
       : join(appRoot, 'dist/native/moki-dictate');
     const commandEnvironment = await localCommandEnvironment();
+    updater = new MokiUpdater(app.isPackaged && process.platform === 'darwin' && !smoke, app.getVersion(), async () => {
+      const loaded = await import('electron-updater');
+      return loaded.autoUpdater ?? (loaded as unknown as { default: typeof loaded }).default.autoUpdater;
+    }, updaterChanged);
     browserExtension = new BrowserExtensionHost(browserExtensionChanged);
     if (process.env.MOKI_DISABLE_BROWSER_EXTENSION !== '1') {
       try { await browserExtension.start(); }
@@ -257,6 +268,25 @@ else {
       const state = toolLoading.handle(command);
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:tool-loading-state', state);
       return state;
+    });
+    ipcMain.handle('moki:updater', async (event, command: unknown) => {
+      assertTrusted(event);
+      if (event.sender !== settings?.webContents) throw new Error('Update controls are only available in Settings.');
+      if (!['status', 'check', 'download', 'install'].includes(String(command))) throw new Error('Invalid update command.');
+      const action = command as UpdaterCommand;
+      if (action === 'status') return updater!.state();
+      if (action === 'check') return updater!.check();
+      if (action === 'download') return updater!.download();
+      if (updater!.state().status !== 'downloaded') throw new Error('No downloaded update is ready to install.');
+      const answer = await dialog.showMessageBox(settings!, { type: 'question', buttons: ['Restart and update', 'Not now'], defaultId: 0, cancelId: 1, message: 'Restart Moki to install the downloaded update?', detail: 'Open work is already saved.' });
+      if (answer.response !== 0) return updater!.state();
+      quitting = true;
+      globalShortcut.unregisterAll();
+      capture?.close(); providers?.close(); mcpAuth?.close(); speech?.close(); dictation?.close();
+      await Promise.all([browserExtension?.close() ?? Promise.resolve(), runtime?.close() ?? Promise.resolve()]);
+      installingUpdate = true;
+      updater!.install();
+      return updater!.state();
     });
     ipcMain.handle('moki:browser-extension', (event) => {
       assertTrusted(event);
@@ -394,6 +424,7 @@ else {
       ] }] : []),
     ]));
     if (smoke) window.webContents.once('did-finish-load', () => app.quit());
+    else void updater.start();
     if (development) {
       await window.loadURL(DEV_ORIGIN + '/');
       window.webContents.openDevTools({ mode: 'detach' });
@@ -408,7 +439,7 @@ else {
   app.on('activate', show);
   app.on('window-all-closed', () => { /* Tray owns application lifetime. */ });
   app.on('before-quit', (event) => {
-    if (shutdownComplete) return;
+    if (installingUpdate || shutdownComplete) return;
     event.preventDefault();
     if (quitting) return;
     quitting = true;
