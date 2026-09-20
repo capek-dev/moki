@@ -1,0 +1,137 @@
+name: Release macOS app
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version from package.json, for example 0.1.0
+        required: true
+        type: string
+      publish:
+        description: Publish the signed and notarized DMG to GitHub Releases
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Validate version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          if [ "$REQUESTED_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Requested version $REQUESTED_VERSION does not match package.json version $PACKAGE_VERSION" >&2
+            exit 1
+          fi
+          echo "VERSION=$PACKAGE_VERSION" >> "$GITHUB_ENV"
+          echo "TAG=app/v$PACKAGE_VERSION" >> "$GITHUB_ENV"
+
+      - name: Refuse an existing release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Bump package.json instead of overwriting it." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Import Apple certificate
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          echo "$CSC_LINK" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p actions "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p actions "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$CSC_KEY_PASSWORD" -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+
+      - name: Build, sign, and notarize DMG
+        env:
+          CSC_KEYCHAIN: ${{ runner.temp }}/signing.keychain-db
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          IDENTITY=$(security find-identity -v -p codesigning "$CSC_KEYCHAIN" | grep "Developer ID Application" | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          test -n "$IDENTITY"
+          bun run build
+          ./node_modules/.bin/electron-builder --mac dmg --publish never \
+            -c.mac.identity="$IDENTITY" \
+            -c.mac.notarize=true
+
+      - name: Verify app and artifact
+        run: |
+          set -euo pipefail
+          APP="release/mac-arm64/Moki.app"
+          DMG="release/Moki-${VERSION}-arm64.dmg"
+          test -d "$APP"
+          test -f "$DMG"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl --assess --type execute --verbose=2 "$APP"
+          xcrun stapler validate "$APP"
+          xcrun stapler validate "$DMG"
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+
+      - name: Publish GitHub release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          DMG="release/Moki-${VERSION}-arm64.dmg"
+          NOTES=()
+          if [ -s "changelogs/app/v${VERSION}.md" ]; then
+            NOTES=(--notes-file "changelogs/app/v${VERSION}.md")
+          else
+            NOTES=(--generate-notes)
+          fi
+          PRERELEASE=()
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE=(--prerelease)
+          fi
+          gh release create "$TAG" \
+            "$DMG" "$DMG.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Moki $VERSION" \
+            "${NOTES[@]}" \
+            "${PRERELEASE[@]}"
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true

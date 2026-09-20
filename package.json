@@ -17,7 +17,8 @@
     "dev": "bun scripts/dev.ts",
     "smoke:electron": "bun run scripts/electron-smoke.ts",
     "build:dev": "bun scripts/build.ts --dev",
-    "package:dir": "bun run build && electron-builder --dir --publish never"
+    "package:dir": "bun run build && electron-builder --dir --publish never",
+    "package:mac": "bun run build && electron-builder --mac dmg --publish never"
   },
   "dependencies": {
     "@capekai/core": "1.0.16",
@@ -67,6 +68,11 @@
       "category": "public.app-category.productivity",
       "target": ["dmg"],
       "identity": null,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false,
       "extendInfo": {
         "NSScreenCaptureUsageDescription": "Moki captures a screen region only when you choose Capture region.",
         "NSMicrophoneUsageDescription": "Moki uses the microphone only while you hold the dictate button.",
