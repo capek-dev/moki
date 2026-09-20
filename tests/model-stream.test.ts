@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createGenerate, codexFetch } from '@backend/model-stream';
 import type { Turn } from '@backend/chat';
+import { createImageAccounting, type ContextUpdate } from '@shared/context';
 
-const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.6-sol', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };
-const fixedClock = { now: () => new Date('2025-01-02T03:04:05.000Z'), timeZone: () => 'UTC' };
+const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.6-sol', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: '<moki_turn_context>\nCurrent date/time: 2025-01-02T03:04:05; timezone: UTC; UTC: 2025-01-02T03:04:05.000Z.\n</moki_turn_context>\n\n<moki_user_message>\nAgain\n</moki_user_message>' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };
 test('published DeepSeek adapter serializes history and streams in an isolated process', async () => {
   const child = Bun.spawn([process.execPath, 'run', 'tests/fixtures/deepseek-stream.ts'], { stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => child.kill(), 10000);
@@ -36,8 +36,8 @@ for (const thinking of [null, 'low', 'medium', 'high', 'xhigh', 'max'] as const)
     expect(init.redirect).toBe('error');
     const body = JSON.parse(String(init.body));
     expect(body).toMatchObject({ model, stream: true, store: false });
-    expect(body.instructions).toContain('Be kind.');
-    expect(body.instructions).toContain('Current date/time: 2025-01-02T03:04:05; timezone: UTC; UTC: 2025-01-02T03:04:05.000Z.');
+    expect(body.instructions).toBe('Be kind.');
+    expect(body.input.at(-1).content[0].text).toContain('Current date/time: 2025-01-02T03:04:05; timezone: UTC; UTC: 2025-01-02T03:04:05.000Z.');
     if (thinking) expect(body.reasoning).toEqual({ effort: thinking });
     else expect(body.reasoning).toBeUndefined();
     expect(body.input.map((item: { role: string }) => item.role)).toEqual(['user', 'assistant', 'user']);
@@ -50,7 +50,7 @@ for (const thinking of [null, 'low', 'medium', 'high', 'xhigh', 'max'] as const)
       { type: 'response.output_item.done', output_index: 0, item: { type: 'message', id: 'msg_1', role: 'assistant', content: [{ type: 'output_text', text: 'Hello again', annotations: [] }] } },
       { type: 'response.completed', response: { id: 'resp_1', status: 'completed', incomplete_details: null, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } },
     ]), { headers: { 'Content-Type': 'text/event-stream' } });
-  }) as unknown as typeof fetch, fixedClock);
+  }) as unknown as typeof fetch);
   let output = '';
   for await (const text of generate({ ...turn, model, thinking }, new AbortController().signal)) output += text;
   expect(output).toBe('Hello again');
@@ -74,6 +74,29 @@ test('Codex Responses serializes screenshot bytes as input_image', async () => {
   expect(body.input[0].content.map((part: { type: string }) => part.type)).toEqual(['input_text', 'input_image']);
   expect(body.input[0].content[1].image_url).toMatch(/^data:image\/png;base64,/);
 });
+test('provider cache token usage is exposed through context updates', async () => {
+  const updates: ContextUpdate[] = [];
+  const generate = createGenerate((async () => new Response(sse([
+    { type: 'response.created', response: { id: 'resp_cache', created_at: 1, model: 'gpt-5.6-sol' } },
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg_cache', role: 'assistant', content: [] } },
+    { type: 'response.content_part.added', item_id: 'msg_cache', output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } },
+    { type: 'response.output_text.delta', item_id: 'msg_cache', output_index: 0, content_index: 0, delta: 'Cached' },
+    { type: 'response.output_item.done', output_index: 0, item: { type: 'message', id: 'msg_cache', role: 'assistant', content: [{ type: 'output_text', text: 'Cached', annotations: [] }] } },
+    { type: 'response.completed', response: { id: 'resp_cache', status: 'completed', incomplete_details: null, usage: { input_tokens: 10, input_tokens_details: { cached_tokens: 7 }, output_tokens: 1, total_tokens: 11 } } },
+  ]), { headers: { 'Content-Type': 'text/event-stream' } })) as unknown as typeof fetch);
+  const cachedTurn: Turn = {
+    ...turn,
+    context: {
+      turn: { conversationId: 'conversation', messageId: 'message', turnId: 'turn' },
+      imageAccounting: createImageAccounting(0, 0),
+      onUpdate: (update) => updates.push(update),
+    },
+  };
+  for await (const _ of generate(cachedTurn, new AbortController().signal)) {}
+  const provider = updates.find((update) => update.type === 'provider');
+  expect(provider).toMatchObject({ type: 'provider', inputTokens: 10, cacheReadInputTokens: 7, outputTokens: 1, totalTokens: 11 });
+});
+
 test('Codex endpoint guard prevents credentials reaching other origins and does not retry 401', async () => {
   let calls = 0;
   const fetcher = (async () => { calls++; return new Response('{"error":{"message":"unauthorized"}}', { status: 401, headers: { 'Content-Type': 'application/json' } }); }) as unknown as typeof fetch;

@@ -72,6 +72,7 @@ export class Store {
           CREATE TABLE IF NOT EXISTS assistants (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, instructions TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, assistantId TEXT NOT NULL REFERENCES assistants(id), title TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, conversationId TEXT NOT NULL REFERENCES conversations(id), text TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS message_model_context (messageId TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE, context TEXT NOT NULL, memoryIdsJson TEXT NOT NULL DEFAULT '[]');
           CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, messageId TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, mime TEXT NOT NULL, byteSize INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, storageName TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS cua_disabled_tools (name TEXT PRIMARY KEY);
           CREATE TABLE IF NOT EXISTS cua_integration (id INTEGER PRIMARY KEY CHECK (id = 0), enabled INTEGER NOT NULL);
@@ -120,7 +121,25 @@ export class Store {
         // Plan 28 slice 1: legacy rows keep createdAt NULL and revision 1.
         add('messages', 'createdAt', 'INTEGER');
         add('messages', 'revision', 'INTEGER NOT NULL DEFAULT 1');
+        add('message_model_context', 'memoryIdsJson', "TEXT NOT NULL DEFAULT '[]'");
         installMemorySchema(this.db);
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS message_model_context_memory (
+            messageId TEXT NOT NULL REFERENCES message_model_context(messageId) ON DELETE CASCADE,
+            memoryId TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+            memoryRevision INTEGER NOT NULL CHECK (memoryRevision >= 1),
+            PRIMARY KEY (messageId, memoryId)
+          );
+        `);
+        add('message_model_context_memory', 'memoryRevision', 'INTEGER NOT NULL DEFAULT 1 CHECK (memoryRevision >= 1)');
+        this.db.exec(`
+          DROP TRIGGER IF EXISTS message_model_context_memory_revised;
+          CREATE TRIGGER IF NOT EXISTS message_model_context_memory_forgotten
+          AFTER DELETE ON message_model_context_memory
+          BEGIN
+            DELETE FROM message_model_context WHERE messageId = OLD.messageId;
+          END;
+        `);
         installMemoryGraphSchema(this.db);
         installLearningSchema(this.db);
         this.db.exec("UPDATE messages SET status = 'interrupted' WHERE status = 'streaming'");
@@ -137,7 +156,7 @@ export class Store {
       this.db.close();
       throw error;
     }
-    this.memoryRepository = new MemoryRepository(this.db, false, () => this.touchMemoryRevision(), (memoryId) => this.scrubMemoryRecallHistory(memoryId));
+    this.memoryRepository = new MemoryRepository(this.db, false, () => this.touchMemoryRevision(), (memoryId) => this.scrubMemoryRecallHistory(memoryId), (memoryId) => this.invalidateModelContexts(memoryId));
     this.memoryGraphRepository = new MemoryGraphRepository(this.db, false);
     this.learningRepository = new MemoryLearningRepository(this.db, () => this.touchMemoryRevision());
     this.sessionSearchRepository = new SessionSearchRepository(this.db);
@@ -156,6 +175,31 @@ export class Store {
   }
   messages(id: string): Message[] {
     return this.db.query<MessageRow, [string]>('SELECT * FROM (SELECT rowid AS sequence, * FROM messages WHERE conversationId = ? ORDER BY rowid DESC LIMIT 100) ORDER BY sequence').all(id).map(decodeMessage);
+  }
+  modelContextsFor(messages: readonly Message[]): Map<string, string> {
+    if (!messages.length) return new Map();
+    const placeholders = messages.map(() => '?').join(',');
+    const rows = this.db.query<{ messageId: string; context: string }, string[]>(`SELECT messageId, context FROM message_model_context WHERE messageId IN (${placeholders})`).all(...messages.map((message) => message.id));
+    return new Map(rows.map((row) => [row.messageId, row.context]));
+  }
+  setMessageModelContext(messageId: string, context: string, memories: readonly { memoryId: string; revision: number }[] = []): void {
+    const id = text(messageId, 100);
+    if (typeof context !== 'string' || !context.trim() || context.length > 64_000) throw new Error('Invalid model context.');
+    if (!Array.isArray(memories) || memories.length > 16) throw new Error('Invalid model context memory references.');
+    const normalizedMemories = memories.map((memory) => ({ memoryId: text(memory.memoryId, 100), revision: integer(memory.revision, 'memory revision') }));
+    if (new Set(normalizedMemories.map((memory) => memory.memoryId)).size !== normalizedMemories.length) throw new Error('Invalid model context memory references.');
+    const memoryIdsJson = JSON.stringify(normalizedMemories);
+    const row = this.db.query<{ role: string }, [string]>('SELECT role FROM messages WHERE id = ?').get(id);
+    if (!row || row.role !== 'user') throw new Error('Model context requires a user message.');
+    this.db.transaction(() => {
+      this.db.query('INSERT OR IGNORE INTO message_model_context (messageId, context, memoryIdsJson) VALUES (?, ?, ?)').run(id, context, memoryIdsJson);
+      const stored = this.db.query<{ context: string; memoryIdsJson: string }, [string]>('SELECT context, memoryIdsJson FROM message_model_context WHERE messageId = ?').get(id);
+      if (!stored || stored.context !== context || stored.memoryIdsJson !== memoryIdsJson) throw new Error('Model context is already fixed for this user turn.');
+      const linked = this.db.query<{ memoryId: string; memoryRevision: number }, [string]>('SELECT memoryId, memoryRevision FROM message_model_context_memory WHERE messageId = ? ORDER BY memoryId').all(id);
+      const expectedLinks = [...normalizedMemories].sort((left, right) => left.memoryId.localeCompare(right.memoryId));
+      if (linked.length && JSON.stringify(linked) !== JSON.stringify(expectedLinks)) throw new Error('Model context memory links are already fixed for this user turn.');
+      for (const memory of normalizedMemories) this.db.query('INSERT OR IGNORE INTO message_model_context_memory (messageId, memoryId, memoryRevision) VALUES (?, ?, ?)').run(id, memory.memoryId, memory.revision);
+    })();
   }
   /** Return the user message immediately preceding the host-created assistant reply. */
   foregroundUserSource(assistantMessageId: string): { sourceMessageId: string; sourceRevision: number } {
@@ -194,8 +238,18 @@ export class Store {
     return record;
   }
   onReviewInvalidated?: () => void;
+  private invalidateModelContexts(memoryId: string) {
+    this.db.query('DELETE FROM message_model_context WHERE messageId IN (SELECT messageId FROM message_model_context_memory WHERE memoryId = ?)').run(memoryId);
+  }
   private scrubMemoryRecallHistory(memoryId: string) {
     this.onReviewInvalidated?.();
+    const contexts = this.db.query<{ messageId: string; memoryIdsJson: string }, []>('SELECT messageId, memoryIdsJson FROM message_model_context').all();
+    for (const context of contexts) {
+      try {
+        const memoryRefs = JSON.parse(context.memoryIdsJson) as unknown;
+        if (Array.isArray(memoryRefs) && memoryRefs.some((entry) => entry === memoryId || (entry !== null && typeof entry === 'object' && (entry as { memoryId?: unknown }).memoryId === memoryId))) this.db.query('DELETE FROM message_model_context WHERE messageId = ?').run(context.messageId);
+      } catch { this.db.query('DELETE FROM message_model_context WHERE messageId = ?').run(context.messageId); }
+    }
     const rows = this.db.query<{ id: string; selectedJson: string }, []>('SELECT id, selectedJson FROM memory_recall_history').all();
     for (const row of rows) {
       try {
@@ -438,7 +492,7 @@ export class Store {
       throw error;
     }
     this.removeAttachmentFiles(files);
-    return { messageId, assistant };
+    return { messageId, userMessageId, assistant };
   }
   // Source revisions (plan 28): a row's revision counts its published content
   // versions, starting at 1. Streaming writes are provisional, never evidence,

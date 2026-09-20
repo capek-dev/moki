@@ -70,7 +70,7 @@ export interface ContextTurn {
 
 export type ContextUpdate =
   | { type: 'estimate'; requestNumber: number; estimate: ModelContextEstimate; contextWindowTokens: number; outputReserveTokens: number }
-  | { type: 'provider'; requestNumber: number; inputTokens?: number; outputTokens?: number; totalTokens?: number };
+  | { type: 'provider'; requestNumber: number; inputTokens?: number; noCacheInputTokens?: number; cacheReadInputTokens?: number; cacheWriteInputTokens?: number; outputTokens?: number; totalTokens?: number };
 
 export interface ContextUsage {
   turn: ContextTurn;
@@ -82,6 +82,9 @@ export interface ContextUsage {
   estimateSource: 'heuristic';
   providerReported?: {
     inputTokens?: number;
+    noCacheInputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheWriteInputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
     source: 'ai-sdk-provider-usage';

@@ -83,7 +83,8 @@ test('edit-resend atomically replaces the tail and rebuilds provider history', a
     expect(messages.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect(messages.map((m) => m.text)).toEqual(['Hello edited', 'fresh reply']);
     expect(store.conversation(id).title).toBe('Hello edited');
-    expect(turns.at(-1)!.messages.map((m) => m.content)).toEqual(['Hello edited']);
+    expect(turns.at(-1)!.messages).toHaveLength(1);
+    expect(turns.at(-1)!.messages[0].content).toContain('<moki_user_message>\nHello edited\n</moki_user_message>');
     // Editing an assistant message or an unknown id fails without writing.
     expect(() => chat.start({ conversationId: id, text: 'x', model: 'deepseek-flash', credentials, editOf: messages[1].id })).toThrow('Only your messages');
     expect(() => chat.start({ conversationId: id, text: 'x', model: 'deepseek-flash', credentials, editOf: crypto.randomUUID() })).toThrow('Message not found');

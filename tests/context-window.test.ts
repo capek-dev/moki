@@ -79,5 +79,7 @@ test('the ring keeps Prokop thresholds and shows no percentage text', async () =
   expect(ring).toContain("if (percentage >= 60) return 'critical'");
   expect(ring).toContain("if (percentage >= 40) return 'warning'");
   expect(ring).toContain('aria-label={`Context window usage: ${percentage}%`}');
+  expect(ring).toContain("['Provider cache read', providerUsage?.cacheReadInputTokens?.toLocaleString() ?? 'Not reported']");
+  expect(ring).toContain("['Provider cache write', providerUsage?.cacheWriteInputTokens?.toLocaleString() ?? 'Not reported']");
   expect(ring).not.toContain('>{percentage}%<');
 });

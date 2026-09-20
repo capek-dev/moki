@@ -281,7 +281,13 @@ function decodeEvidence(row: EvidenceRow): SourceEvidence {
 }
 
 export class MemoryRepository {
-  constructor(private readonly db: Database, installSchema = true, private readonly onMutation: () => void = () => {}, private readonly onForget: (memoryId: string) => void = () => {}) {
+  constructor(
+    private readonly db: Database,
+    installSchema = true,
+    private readonly onMutation: () => void = () => {},
+    private readonly onForget: (memoryId: string) => void = () => {},
+    private readonly onRevision: (memoryId: string) => void = () => {},
+  ) {
     if (installSchema) this.db.transaction(() => installMemorySchema(this.db))();
   }
 
@@ -562,6 +568,7 @@ export class MemoryRepository {
       const updated = this.db.query('UPDATE memories SET text = ?, kind = ?, state = ?, pinned = ?, core = ?, validFrom = ?, validUntil = ?, revision = revision + 1 WHERE id = ? AND revision = ?')
         .run(text, kind, state, pinned ? 1 : 0, core ? 1 : 0, validFrom, validUntil, memoryId, expected);
       if (updated.changes !== 1) throw new Error('Memory revision conflict.');
+      this.onRevision(memoryId);
       const evidenceId = crypto.randomUUID();
       this.db.query('INSERT INTO memory_evidence (id, memoryId, memoryRevision, sourceMessageId, sourceRevision, sourceRole, stance, provenance, recordedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(evidenceId, memoryId, expected + 1, sourceMessageId, sourceRevision, liveSource.role, 'supporting', evidenceProvenance, Date.now());
@@ -677,6 +684,7 @@ export class MemoryRepository {
       this.validateInterval(validFrom, validUntil);
       const result = this.db.query('UPDATE memories SET text = ?, kind = ?, state = ?, pinned = ?, core = ?, validFrom = ?, validUntil = ?, revision = revision + 1 WHERE id = ? AND revision = ?').run(text, kind, state, pinned ? 1 : 0, core ? 1 : 0, validFrom, validUntil, memoryId, expectedRevision);
       if (result.changes !== 1) throw new Error('Memory revision conflict.');
+      this.onRevision(memoryId);
     })();
     this.onMutation();
     return this.get(memoryId)!;

@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 let calls = 0;
 let thinking: 'high' | 'max' | null = null;
 let loopCalls = 0;
-let now = new Date('2025-01-02T03:04:05.000Z');
-const fixedClock = { now: () => now, timeZone: () => 'UTC' };
+const turnContext = '<moki_turn_context>\nCurrent date/time: 2025-01-02T03:04:05; timezone: UTC; UTC: 2025-01-02T03:04:05.000Z.\n</moki_turn_context>';
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   calls++;
   assert.equal(String(input), 'https://api.deepseek.com/v1/chat/completions');
@@ -13,7 +12,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   assert.equal(body.model, 'deepseek-flash');
   assert.equal(body.stream, true);
   assert.equal(body.messages[0].role, 'system');
-  assert.equal(body.messages[0].content, `Be kind.\n\nCurrent date/time: ${loopCalls === 1 ? '2025-01-02T04:05:06' : '2025-01-02T03:04:05'}; timezone: UTC; UTC: ${loopCalls === 1 ? '2025-01-02T04:05:06.000Z' : '2025-01-02T03:04:05.000Z'}.`);
+  assert.equal(body.messages[0].content, 'Be kind.');
   const chunk = (delta: unknown, finish_reason: string | null = null) => ({ id: 'chat_1', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] });
   if (body.tools) {
     loopCalls++;
@@ -34,15 +33,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response([chunk({ role: 'assistant', content: 'Hello' }), chunk({}, 'stop')].map((value) => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
 }) as typeof fetch;
 const { createGenerate } = await import('@backend/model-stream');
-const generate = createGenerate(fetch, fixedClock);
+const generate = createGenerate(fetch);
 for (const level of [null, 'high', 'max'] as const) {
   thinking = level;
   let output = '';
-  for await (const delta of generate({ thinking, conversationId: 'c', model: 'deepseek-flash', provider: 'deepseek', instructions: 'Be kind.', credentials: { provider: 'deepseek', key: 'offline-test' }, messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: 'Again' }] }, new AbortController().signal)) output += delta;
+  for await (const delta of generate({ thinking, conversationId: 'c', model: 'deepseek-flash', provider: 'deepseek', instructions: 'Be kind.', credentials: { provider: 'deepseek', key: 'offline-test' }, messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: `${turnContext}\n\nAgain` }] }, new AbortController().signal)) output += delta;
   assert.equal(output, 'Hello');
 }
 let loopOutput = '';
-for await (const delta of generate({ conversationId: 'clock-loop', model: 'deepseek-flash', provider: 'deepseek', instructions: 'Be kind.', credentials: { provider: 'deepseek', key: 'offline-test' }, messages: [{ role: 'user', content: 'Check the clock after the tool.' }], tools: [{ name: 'probe', description: 'Probe the clock.', inputSchema: { type: 'object' }, execute: async () => { now = new Date('2025-01-02T04:05:06.000Z'); return 'advanced'; } }] }, new AbortController().signal)) loopOutput += delta;
+for await (const delta of generate({ conversationId: 'clock-loop', model: 'deepseek-flash', provider: 'deepseek', instructions: 'Be kind.', credentials: { provider: 'deepseek', key: 'offline-test' }, messages: [{ role: 'user', content: `${turnContext}\n\nCheck the clock after the tool.` }], tools: [{ name: 'probe', description: 'Probe the clock.', inputSchema: { type: 'object' }, execute: async () => 'complete' }] }, new AbortController().signal)) loopOutput += delta;
 assert.equal(loopOutput, 'Loop done');
 assert.equal(loopCalls, 2);
 assert.equal(calls, 5);

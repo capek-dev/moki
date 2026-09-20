@@ -20,6 +20,10 @@ export function ContextRing({ estimate, lastRequest, contextWindow, outputReserv
   const ringClass = percentage === 0
     ? 'text-ink-3/30'
     : status === 'critical' ? 'text-danger' : status === 'warning' ? 'text-warn' : 'text-accent';
+  const providerUsage = lastRequest?.providerReported;
+  const cacheHitPercentage = providerUsage?.inputTokens && providerUsage.cacheReadInputTokens !== undefined
+    ? Math.round((providerUsage.cacheReadInputTokens / providerUsage.inputTokens) * 100)
+    : undefined;
   const rows = [
     ['Model', modelName],
     ['Context window', formatTokens(contextWindow)],
@@ -30,7 +34,10 @@ export function ContextRing({ estimate, lastRequest, contextWindow, outputReserv
     ['Draft history text', estimate.textTokens.toLocaleString()],
     ['Draft screenshots', estimate.imageTokens.toLocaleString()],
     ['Last request (heuristic)', lastRequest ? `${lastRequest.estimate.totalTokens.toLocaleString()} · request ${lastRequest.requestNumber}` : 'Not sent'],
-    ['Provider input (last request)', lastRequest?.providerReported?.inputTokens?.toLocaleString() ?? 'Not reported'],
+    ['Provider input (last request)', providerUsage?.inputTokens?.toLocaleString() ?? 'Not reported'],
+    ['Provider cache read', providerUsage?.cacheReadInputTokens?.toLocaleString() ?? 'Not reported'],
+    ['Provider cache write', providerUsage?.cacheWriteInputTokens?.toLocaleString() ?? 'Not reported'],
+    ['Provider cache hit', cacheHitPercentage === undefined ? 'Not reported' : `${cacheHitPercentage}%`],
     ['Messages included', `${estimate.includedMessages} of ${estimate.totalMessages}${estimate.truncated ? ' · capped' : ''}`],
   ] as const;
   return <div className="group relative">
@@ -54,7 +61,7 @@ export function ContextRing({ estimate, lastRequest, contextWindow, outputReserv
           <span className="text-right text-ink-2">{value}</span>
         </div>)}
       </div>
-      <p className="mt-1.5 text-[10px] leading-snug text-ink-3/80">Draft and request estimates are heuristics. Provider input is reported usage, not exact billing.</p>
+      <p className="mt-1.5 text-[10px] leading-snug text-ink-3/80">Draft and request estimates are heuristics. Provider input and cache values are reported usage, not exact billing.</p>
     </div>
   </div>;
 }

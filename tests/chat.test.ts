@@ -11,14 +11,17 @@ import { applyResult } from '@renderer/lib/chat-state';
 import type { Attachment, Message, Result } from '@shared/protocol';
 
 const credentials = { provider: 'deepseek' as const, key: 'test-secret' };
+const fixedClock = { now: () => new Date('2025-01-02T03:04:05.000Z'), timeZone: () => 'UTC' };
 function setup(generate: Generate) {
   const store = new Store(':memory:');
   const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
   let finish!: () => void;
   const done = new Promise<void>((resolve) => { finish = resolve; });
   const events: Result[] = [];
-  const chat = new Chat(store, generate, (result) => { events.push(result); if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); });
-  return { store, id, chat, done, events, send: () => chat.start({ conversationId: id, text: 'Hello', model: 'deepseek-flash', credentials }), close: () => { chat.close(); store.close(); } };
+  let now = new Date('2025-01-02T03:04:05.000Z');
+  const clock = { now: () => now, timeZone: () => 'UTC' };
+  const chat = new Chat(store, generate, (result) => { events.push(result); if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); }, undefined, undefined, undefined, clock);
+  return { store, id, chat, done, events, send: () => chat.start({ conversationId: id, text: 'Hello', model: 'deepseek-flash', credentials }), advanceClock: () => { now = new Date('2025-01-02T04:05:06.000Z'); }, close: () => { chat.close(); store.close(); } };
 }
 test('streamed replies persist, carry attribution, and reuse role-based history', async () => {
   const turns: Turn[] = [];
@@ -27,10 +30,16 @@ test('streamed replies persist, carry attribution, and reuse role-based history'
     expect(f.send().snapshot.messages.at(-1)?.status).toBe('streaming');
     await f.done;
     expect(f.store.messages(f.id).at(-1)).toMatchObject({ role: 'assistant', text: 'Hello there', status: 'complete', model: 'deepseek-flash', assistantName: 'Moki' });
-    expect(turns[0].messages).toEqual([{ role: 'user', content: 'Hello' }]);
+    expect(turns[0].messages).toHaveLength(1);
+    const firstUserContent = turns[0].messages[0].content;
+    expect(firstUserContent).toContain('UTC: 2025-01-02T03:04:05.000Z.');
+    expect(firstUserContent).toContain('<moki_user_message>\nHello\n</moki_user_message>');
+    f.advanceClock();
     f.send();
     await new Promise((r) => setTimeout(r, 5));
-    expect(turns[1].messages).toEqual([{ role: 'user', content: 'Hello' }, { role: 'assistant', content: 'Hello there' }, { role: 'user', content: 'Hello' }]);
+    expect(turns[1].messages.map((message) => message.role)).toEqual(['user', 'assistant', 'user']);
+    expect(turns[1].messages[0].content).toBe(firstUserContent);
+    expect(turns[1].messages[2].content).toContain('UTC: 2025-01-02T04:05:06.000Z.');
     expect(JSON.stringify(f.events)).not.toContain('test-secret');
   } finally { f.close(); }
 });
@@ -57,6 +66,24 @@ function setupWithTools(generate: Generate, toolbag: Toolbag) {
   const chat = new Chat(store, generate, (result) => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); }, async () => toolbag);
   return { store, id, chat, done, send: () => chat.start({ conversationId: id, text: 'List apps', model: 'deepseek-flash', credentials }), close: () => { chat.close(); store.close(); } };
 }
+test('tool definitions are sorted by stable model-facing name', async () => {
+  const names: string[][] = [];
+  const bag: Toolbag = {
+    tools: [
+      { name: 'z_tool', description: 'Last tool.', inputSchema: { type: 'object' } },
+      { name: 'a_tool', description: 'First tool.', inputSchema: { type: 'object' } },
+    ],
+    execute: async () => ({ text: 'unused', isError: false }),
+    close: () => {},
+  };
+  const f = setupWithTools(async function* (turn) { names.push(turn.tools!.map((tool) => tool.name)); yield 'ok'; }, bag);
+  try {
+    f.send();
+    await f.done;
+    expect(names).toEqual([['a_tool', 'z_tool']]);
+  } finally { f.close(); }
+});
+
 test('tool calls execute through the bag, persist on the reply, and close', async () => {
   let closed = 0;
   const executed: Array<{ name: string; args: unknown }> = [];
@@ -180,6 +207,99 @@ test('screenshots move into durable message storage and replay as image content'
     expect(JSON.stringify(snapshot)).not.toContain(dir);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+test('hidden model context survives reopen without entering the visible snapshot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'moki-model-context-'));
+  const path = join(dir, 'moki.sqlite');
+  try {
+    const store = new Store(path);
+    const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+    const { userMessageId } = store.begin(id, 'Visible text', 'deepseek-flash');
+    store.setMessageModelContext(userMessageId, '<moki_turn_context>hidden</moki_turn_context>');
+    store.setMessageModelContext(userMessageId, '<moki_turn_context>hidden</moki_turn_context>');
+    expect(() => store.setMessageModelContext(userMessageId, '<moki_turn_context>changed</moki_turn_context>')).toThrow('already fixed');
+    expect(JSON.stringify(store.snapshot(id))).not.toContain('hidden');
+    store.close();
+    const reopened = new Store(path);
+    try {
+      const messages = reopened.messages(id);
+      expect(reopened.modelContextsFor(messages).get(userMessageId)).toBe('<moki_turn_context>hidden</moki_turn_context>');
+      expect(history(messages, [], undefined, (messageId) => reopened.modelContextsFor(messages).get(messageId))[0].content).toContain('hidden');
+    } finally { reopened.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('intermediate model-context schemas add missing columns and invalidate legacy links after reopen', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'moki-model-context-migration-'));
+  const path = join(dir, 'moki.sqlite');
+  let conversationId = '';
+  let messageId = '';
+  let memoryId = '';
+  try {
+    const initial = new Store(path);
+    conversationId = initial.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+    messageId = initial.handle({ method: 'saveMessage', conversationId, text: 'Legacy context turn' }).snapshot.messages.at(-1)!.id;
+    memoryId = initial.memoryRepository.create({ text: 'Legacy linked memory', kind: 'note' }).id;
+    initial.close();
+
+    const intermediate = new Database(path);
+    intermediate.exec(`
+      PRAGMA foreign_keys = OFF;
+      DROP TABLE message_model_context_memory;
+      DROP TABLE message_model_context;
+      CREATE TABLE message_model_context (
+        messageId TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+        context TEXT NOT NULL
+      );
+      CREATE TABLE message_model_context_memory (
+        messageId TEXT NOT NULL REFERENCES message_model_context(messageId) ON DELETE CASCADE,
+        memoryId TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        PRIMARY KEY (messageId, memoryId)
+      );
+    `);
+    intermediate.query('INSERT INTO message_model_context (messageId, context) VALUES (?, ?)').run(messageId, '<moki_turn_context>legacy</moki_turn_context>');
+    intermediate.query('INSERT INTO message_model_context_memory (messageId, memoryId) VALUES (?, ?)').run(messageId, memoryId);
+    intermediate.close();
+
+    const reopened = new Store(path);
+    try {
+      const db = (reopened as unknown as { db: Database }).db;
+      expect(db.query<{ name: string }, []>('PRAGMA table_info(message_model_context)').all().map((column) => column.name)).toContain('memoryIdsJson');
+      expect(db.query<{ name: string }, []>('PRAGMA table_info(message_model_context_memory)').all().map((column) => column.name)).toContain('memoryRevision');
+      expect(reopened.modelContextsFor(reopened.messages(conversationId)).get(messageId)).toContain('legacy');
+      reopened.memoryRepository.update(memoryId, 1, { text: 'Revised linked memory' });
+      expect(reopened.modelContextsFor(reopened.messages(conversationId)).has(messageId)).toBe(false);
+    } finally { reopened.close(); }
+
+    const reopenedAgain = new Store(path);
+    try {
+      const db = (reopenedAgain as unknown as { db: Database }).db;
+      expect(db.query<{ count: number }, []>("SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = 'message_model_context_memory_forgotten'").get()?.count).toBe(1);
+    } finally { reopenedAgain.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('both memory revision paths remove stale hidden replay context only after successful CAS', () => {
+  const store = new Store(':memory:');
+  try {
+    const id = store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;
+    const memory = store.memoryRepository.create({ text: 'Old preference', kind: 'preference', core: true });
+    const firstTurn = store.handle({ method: 'saveMessage', conversationId: id, text: 'Use my old preference' }).snapshot.messages.at(-1)!;
+    store.setMessageModelContext(firstTurn.id, '<moki_turn_context>Old preference</moki_turn_context>', [{ memoryId: memory.id, revision: memory.revision }]);
+    store.memoryRepository.update(memory.id, memory.revision, { text: 'New preference' });
+    expect(store.modelContextsFor([firstTurn]).has(firstTurn.id)).toBe(false);
+
+    const secondTurn = store.handle({ method: 'saveMessage', conversationId: id, text: 'Use my new preference' }).snapshot.messages.at(-1)!;
+    store.setMessageModelContext(secondTurn.id, '<moki_turn_context>New preference</moki_turn_context>', [{ memoryId: memory.id, revision: 2 }]);
+    store.memoryRepository.replaceWithForegroundEvidence(memory.id, 2, { text: 'Newest preference' }, { sourceMessageId: secondTurn.id, sourceRevision: secondTurn.revision! });
+    expect(store.modelContextsFor([secondTurn]).has(secondTurn.id)).toBe(false);
+
+    const thirdTurn = store.handle({ method: 'saveMessage', conversationId: id, text: 'Keep this snapshot on conflict' }).snapshot.messages.at(-1)!;
+    store.setMessageModelContext(thirdTurn.id, '<moki_turn_context>Newest preference</moki_turn_context>', [{ memoryId: memory.id, revision: 3 }]);
+    expect(() => store.memoryRepository.update(memory.id, 2, { text: 'Stale edit' })).toThrow('Memory revision conflict.');
+    expect(store.modelContextsFor([thirdTurn]).has(thirdTurn.id)).toBe(true);
+  } finally { store.close(); }
+});
+
 test('image history limits omit old images without dropping their message text', () => {
   const messages = Array.from({ length: 5 }, (_, index): Message => ({
     id: `message-${index}`,
@@ -227,14 +347,19 @@ test('enabled basic recall is assembled per turn and never saved into assistant 
   let finish!: () => void;
   const done = new Promise<void>((resolve) => { finish = resolve; });
   const memory = store.memoryRepository.create({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', text: 'I prefer quiet trains.', kind: 'preference', core: true });
-  const chat = new Chat(store, async function* (turn) { turns.push(turn); yield 'ok'; }, (result) => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); }, undefined, undefined, { enabled: true, maxEntries: 4, maxCandidates: 4, maxTextChars: 1000 });
+  const chat = new Chat(store, async function* (turn) { turns.push(turn); yield 'ok'; }, (result) => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finish(); }, undefined, undefined, { enabled: true, maxEntries: 4, maxCandidates: 4, maxTextChars: 1000 }, fixedClock);
   try {
     chat.start({ conversationId: id, text: 'Book a train.', model: 'deepseek-flash', credentials });
     await done;
-    expect(turns[0].instructions).toContain('<basic_memory_context>');
-    expect(turns[0].instructions).toContain('I prefer quiet trains.');
+    expect(turns[0].instructions).not.toContain('<basic_memory_context>');
+    expect(turns[0].messages[0].content).toContain('<basic_memory_context>');
+    expect(turns[0].messages[0].content).toContain('I prefer quiet trains.');
+    expect(JSON.stringify(store.snapshot(id))).not.toContain('I prefer quiet trains.');
     expect(store.assistantFor(id).instructions).toBe('Be helpful, clear, and kind.');
-    expect(memory.id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    const userMessage = store.messages(id).find((message) => message.role === 'user')!;
+    expect(store.modelContextsFor([userMessage]).get(userMessage.id)).toContain('I prefer quiet trains.');
+    store.memoryRepository.forget(memory.id, memory.revision, { sourceMessageId: userMessage.id, sourceRevision: userMessage.revision! });
+    expect(store.modelContextsFor([userMessage]).has(userMessage.id)).toBe(false);
   } finally { chat.close(); store.close(); }
 });
 

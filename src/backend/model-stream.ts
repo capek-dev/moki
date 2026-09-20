@@ -5,7 +5,6 @@ import { createSingleModelConfiguration, withRuntimeConfiguration } from '@capek
 import { describeError, type Generate, type TurnToolOutput } from '@backend/chat';
 import { requireModel, requireThinking } from '@shared/models';
 import { estimateModelContext, ContextBudgetError, type ContextUpdate } from '@shared/context';
-import { formatClockContext, systemClock, withClockContext, type Clock } from '@shared/clock';
 
 // Multi-step tool loop budget. The AI SDK has no unlimited mode (omitting
 // stopWhen defaults to a single step), so the maximum expressible cap is used;
@@ -26,7 +25,7 @@ export function codexFetch(access: string, accountId: string, fetcher: typeof fe
     });
   }) as typeof fetch;
 }
-export function createGenerate(fetcher: typeof fetch = fetch, clock: Clock = systemClock): Generate {
+export function createGenerate(fetcher: typeof fetch = fetch): Generate {
   return async function* (turn, signal) {
   const catalogModel = requireModel(turn.provider, turn.model);
   const inputLimitTokens = catalogModel.contextWindow - catalogModel.maxOutputTokens;
@@ -66,11 +65,10 @@ export function createGenerate(fetcher: typeof fetch = fetch, clock: Clock = sys
     stopWhen: modelTools ? stepCountIs(TOOL_STEP_BUDGET) : undefined,
     providerOptions: providerOptions as Parameters<typeof streamText>[0]['providerOptions'],
     prepareStep: ({ messages, stepNumber }) => {
-      // prepareStep runs immediately before every provider request, including
-      // the request after a tool result. Read the clock here rather than at
-      // Chat.start so long-running tool loops do not reuse stale context.
+      // Per-turn memory and clock context already live in the replayable user
+      // message. Keep provider instructions byte-stable across every tool step.
       signal.throwIfAborted();
-      const instructions = withClockContext(turn.instructions || 'Be helpful, clear, and kind.', formatClockContext(clock));
+      const instructions = turn.instructions || 'Be helpful, clear, and kind.';
       const estimate = estimateModelContext(messages, instructions, turn.tools ?? [], turn.context?.imageAccounting);
       const requestNumber = stepNumber + 1;
       notifyContext({ type: 'estimate', requestNumber, estimate, contextWindowTokens: catalogModel.contextWindow, outputReserveTokens: catalogModel.maxOutputTokens });
@@ -86,7 +84,16 @@ export function createGenerate(fetcher: typeof fetch = fetch, clock: Clock = sys
       return { system: instructions };
     },
     onStepFinish: ({ stepNumber, usage }) => {
-      notifyContext({ type: 'provider', requestNumber: stepNumber + 1, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens });
+      notifyContext({
+        type: 'provider',
+        requestNumber: stepNumber + 1,
+        inputTokens: usage.inputTokens,
+        noCacheInputTokens: usage.inputTokenDetails.noCacheTokens,
+        cacheReadInputTokens: usage.inputTokenDetails.cacheReadTokens,
+        cacheWriteInputTokens: usage.inputTokenDetails.cacheWriteTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+      });
     },
     abortSignal: signal,
     maxRetries: 0,

@@ -38,8 +38,8 @@ test('saved key survives reopen and drives per-turn selection with actual termin
   };
   const chat = new Chat(store, async function* (turn) {
     const expected = requests === 1 ? 'email__find' : 'drive__upload';
-    expect(turn.tools!.map(tool => tool.name)).toEqual([expected, 'search_tools', 'call_tool']);
-    yield await turn.tools![0].execute({});
+    expect(turn.tools!.map(tool => tool.name)).toEqual(['call_tool', expected, 'search_tools']);
+    yield await turn.tools!.find((tool) => tool.name === expected)!.execute({});
   }, result => { if (result.snapshot.messages.at(-1)?.status !== 'streaming') finished(); },
   (signal, evidence, policy) => smartToolbag([bag], evidence, policy!, signal, {
     fetch: async (_url, init) => {
