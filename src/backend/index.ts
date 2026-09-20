@@ -9,6 +9,7 @@ import { generate } from '@backend/model-stream';
 import { observeLearningReview } from '@backend/learning-review-stream';
 import { smartToolbag } from './tool-scoring';
 import { sessionSearchToolbag } from '@backend/session-search-tool';
+import { webfetchToolbag } from '@backend/webfetch-tool';
 import { composeBuiltInToolbags, memoryToolbag } from '@backend/memory-tool';
 import { LearningCoordinator, reviewWithModel } from '@backend/memory-learning';
 import { verifyLearningSupport } from '@backend/learning-verify';
@@ -45,6 +46,7 @@ const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ 
     return await smartToolbag(bags, evidence, config ?? { enabled: false, maxDirect: 12 }, signal, { formulation: 'direct-name', descriptorMode: 'name-only' });
   } catch (error) { for (const bag of bags) bag.close(); throw error; }
 }, (conversationId, signal, foregroundSource) => composeBuiltInToolbags([
+  webfetchToolbag(signal),
   sessionSearchToolbag(store.sessionSearchRepository, conversationId, signal),
   memoryToolbag(store.memoryRepository, () => store.memoryConfig(), foregroundSource, signal),
 ]), () => store.memoryConfig());

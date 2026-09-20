@@ -1,48 +1,145 @@
 # Moki
 
-A macOS-first, minimal desktop assistant built with Electron, React, and a bundled Bun 1.4.0 runtime using Čapek.
+**A small personal assistant for testing how far memory, context, and large tool catalogs can go.**
 
-## Current slice
+Moki is a macOS desktop assistant that starts simple: one chat, one assistant, and only the abilities you choose to connect through [MCP](https://modelcontextprotocol.io/).
 
-Chat with DeepSeek and Codex subscription: one Moki with editable instructions, provider, and avatar, a per-conversation model picker, streamed replies, Stop, saved screenshot questions, and SQLite history. A small chat window, separate Settings, tray reopen/quit, and optional always-on-top. No workspace setup. The chat header shows a context ring next to the Moki label: an estimated share of the selected model's context window (same bounds the next turn sends, colored at 40/60 percent) with a hover tooltip breakdown and click-to-toggle compact counts. Existing local notes are retained as user messages. Settings > Integrations lists the local Cua Driver (cua.ai) tool catalog over MCP stdio and persists per-tool disable filters applied to the agent's toolset. A master switch disconnects the integration: while off, the driver is never contacted and the agent sees none of its tools; per-tool filters are kept.
+The experiment underneath is less simple. Moki is exploring whether an assistant can:
 
-Settings (Cmd+,) now supports DeepSeek API key verification/storage and Codex subscription sign-in. Credentials are encrypted using Electron safeStorage under userData, never returned to the UI. One subscription is stored initially. Codex opens a browser and completes sign-in automatically through a temporary localhost callback on port 1455. The listener binds only to IPv4/IPv6 loopback and closes on completion, cancellation, timeout, or Quit. Sign-in expires after five minutes. If another app is using port 1455, close its sign-in attempt before retrying. Disconnect removes local credentials, it does not revoke the upstream grant.
+- remember useful facts without turning every conversation into permanent memory;
+- keep evidence and revisions attached to what it learns;
+- retrieve context by meaning, topics, and entities instead of only text matches;
+- work with large MCP tool catalogs without placing every schema in every prompt;
+- remain understandable and controllable by the person using it.
 
-To chat: connect a provider, select it under Settings > Moki, start a conversation, select a model, and Send. Model choices come from a curated Jean2 catalog, not a guarantee of subscription availability. No automatic fallback. Codex refreshes expired credentials before a turn; rejected access requires reconnecting rather than replaying a turn. Disconnect removes credentials for future turns; use Stop to abort a running reply. Hover any of your own messages to **Unsend** it (its text returns to the composer) or **Edit and resend** it; both remove everything after that message, including replies and their screenshots.
+> [!WARNING]
+> **Moki has just started.** It is evolving, macOS-first, solo-maintained, and not ready for public distribution. Memory quality, Jev-assisted retrieval, and large-catalog tool selection are active experiments, not solved problems.
 
-Replies use Čapek's published model adapters with AI SDK streaming and an inline tool loop: enabled Cua Driver tools execute through one lazily spawned MCP session per reply, bounded only by the ten-minute tool-turn deadline (the step cap is set to the maximum expressible, since the AI SDK has no unlimited mode and omitting the bound defaults to one step), with each result capped before returning to the model. The chat shows one friendly current-action line while a tool runs and a collapsed "Used N tools" trail afterwards; calls are saved with the reply but not replayed into later model context. **Memory is available under Settings > Memory as an explicit, persisted basic-recall opt-in. The view can inspect, edit, pin, search, paginate, and forget memory-store records while recall is disabled. Automatic learning is a separate opt-in, future-only, bounded, event-driven review of new completed messages with provider/model selection, conversation exclusions, history, and revision-safe undo. Jev contextual recall is available with separate consent, automatic routing labels, bounded local retrieval, and basic fallback. Live retrieval quality remains unverified. Built-in session search can retrieve older persisted conversation text.** Arbitrary file attachments and computer-use permission gating remain unimplemented; every enabled Cua tool is allowed. History displays the latest 100 messages and sends up to 60k characters of recent completed text plus a separately bounded set of saved screenshots. The picker lists the latest 100 conversations; older records stay on disk. Replies are limited to three minutes (ten when tools run) and 64k characters. Interrupted/failed partial replies are saved but not replayed into subsequent model context. No reasoning logs or tool cards.
+## The idea
 
-Automated verification uses offline provider responses; live model access and native UI need manual verification. Codex browser sign-in was confirmed working by the user before this slice.
+A useful personal assistant needs more than a chat box.
 
-Provider-focused checks: `bun test tests/provider-connections.test.ts tests/settings-window.test.ts tests/desktop-paths.test.ts` after building.
+It needs a model to think, tools to act, and memory to carry useful context forward. Moki keeps those parts separate:
 
-Cua-focused checks: `bun test tests/cua.test.ts tests/settings-window.test.ts` after building. They cover tool-name validation, disabled-set persistence and pruning, catalog merging, transport failure handling, the Settings-only IPC gate, tool result parsing, and the toolbag filter. The real driver connection, the Settings tool list, and live tool execution need manual verification with the daemon running: `bun scripts/cua-runtime-check.ts` exercises catalog, toggle, and disconnect through the compiled runtime, and `bun scripts/cua-call-check.ts` performs one read-only `list_apps` tool call.
+```text
+Chat model                 Context layer                 Abilities
+DeepSeek V4.1 Flash   ->   local memory + Jev     ->    MCP servers
+Codex subscription         recall + learning             Cua Driver
+```
 
-## Screenshot questions
+You bring the model access. You connect the abilities. You explicitly choose whether memory, automatic learning, Jev routing, and smart tool loading are allowed.
 
-Press **Cmd+Shift+8** from any app, choose **Capture region…** from Moki's tray/menu, or use the capture button beside the model picker. Drag over a rectangular screen region, then Moki opens with the screenshot previewed and the prompt focused. Escape cancels selection without changing the current draft. Screenshots are saved with their user messages and can be opened at a larger size from conversation history.
+Nothing here is silently enabled because it sounds convenient.
 
-macOS requires Screen Recording permission. If access is denied, Moki links to System Settings and may need to be restarted after permission changes. The native region selector handles Retina and multiple-display selection. If the global shortcut is already used by another app, the tray and composer actions remain available.
+## What works today
 
-Image input is model-gated. DeepSeek Flash and the curated Codex models send the screenshot as actual multimodal input; DeepSeek V4 Pro remains text-only. Moki disables Send rather than dropping the image or silently switching models. Screenshot files remain in Moki's private data directory, while renderer APIs use random attachment IDs instead of local paths.
+### Bring your own model access
 
-Automated checks inspect serialized DeepSeek and Codex payloads without live provider calls. Native selection, Screen Recording consent, multiple displays, and live image interpretation still require manual Electron verification.
+Moki currently supports:
 
-## Readable answers
+- **DeepSeek V4.1 Flash** with your own DeepSeek API key.
+- **Codex subscription** through ChatGPT browser sign-in.
+- **TypeSafe Jev** with your own TypeSafe API key for experimental context routing.
 
-Assistant replies render Markdown with headings, lists, tables, quotes, and code blocks, including partial replies. Long code lines and wide tables scroll inside their own block instead of stretching the conversation. User messages stay plain text. **Copy answer** copies the original Markdown; **Copy code** copies only that block's text. Both report clipboard success or failure.
+Credentials are encrypted with Electron `safeStorage` and are not returned to the renderer. Model availability is still decided by each provider.
 
-Raw HTML is disabled. Images display alt text without loading remote resources. HTTP(S) links open in the default browser on click; file, script, relative, and credential-bearing URLs are not clickable. Clipboard access is write-only through validated Electron IPC.
+### Give Moki abilities through MCP
 
-Focused checks: `bun test tests/answer.test.tsx tests/screenshot.test.tsx tests/chat.test.ts tests/model-stream.test.ts`. Native clipboard, browser opening, screen capture, and visual layout still require manual Electron verification.
+Add local `stdio` or remote Streamable HTTP MCP servers from Settings. Moki can:
 
-## Single Moki
+- discover each server's tools;
+- enable or disable whole connections;
+- disable individual tools;
+- sign in to compatible remote MCP servers through OAuth;
+- cache catalogs and fall back to the last known catalog when a server is temporarily unreachable;
+- merge connected tools into the agent's toolset.
 
-Chat and settings expose one Moki, with no companion picker or creation flow. Existing assistant records remain intact for future multi-assistant support. Earlier conversations belonging to other records remain visible in History as read-only; New conversation always uses Moki. Stored custom names and historical attribution are not rewritten. Memory settings do not add conversation evidence when a user edits or forgets a record, and forgetting retains conversation history and backups. Skill loading remains a future capability.
+Moki ships with no user-added MCP servers. You decide what it can reach.
 
-## Build and open
+[Cua Driver](https://cua.ai/) is also supported as a built-in MCP connection for computer-use tools on your Mac. Computer-use permission gating is not implemented yet, so every enabled Cua tool is available to the agent.
 
-Requires macOS, Bun **1.4.0**, and Xcode command-line tools for local signing. The existing Git repository is used as-is.
+### Fetch public web pages
+
+Moki includes a built-in `webfetch` tool. It can fetch public HTTP or HTTPS URLs and return Markdown, plain text, or HTML without a per-call approval prompt. It blocks local and private network destinations, checks every redirect, stops after five redirects, limits downloads to 5 MB, and truncates model-facing output.
+
+### Try large tool catalogs without dumping everything into context
+
+When smart tool loading is enabled, Jev scores likely tools for the current request. Moki loads a bounded set of their schemas directly and keeps the rest available through local `search_tools` and `call_tool` discovery tools.
+
+Without Jev, Moki falls back to a bounded names-only index and local tool search. Chat still works.
+
+This is one of the project's main questions: **can an assistant use hundreds of possible actions without paying the full context cost on every turn?**
+
+### Memory that you have to opt into
+
+Memory recall is **off by default**. Automatic learning is a separate switch and is also **off by default**.
+
+When enabled, the current implementation provides:
+
+- local SQLite storage;
+- basic local recall;
+- an explicit memory tool for the current request;
+- searchable, paginated saved memories;
+- edit, pin, inspect, and forget controls;
+- source-message evidence and revision tracking;
+- topic, entity, and relationship records;
+- learning history with revision-safe undo;
+- per-conversation learning exclusions.
+
+Automatic learning reviews only new completed messages after you enable it. It does not backfill old conversations. Only user statements may support learned facts; assistant text is treated as context.
+
+### Jev as the experimental context layer
+
+[TypeSafe Jev](https://typesafe.ai/) is important to what Moki is trying to test. Today it is used for three separate jobs:
+
+1. **Smart tool loading** chooses which tool schemas should enter the prompt directly.
+2. **Contextual memory routing** uses bounded evidence plus learned topic and entity descriptors to select relevant memories.
+3. **Learning verification** checks a proposed fact against the user message cited as evidence before it is saved.
+
+Each path has its own conditions and consent. Connecting Jev does not automatically enable memory, learning, or Jev memory routing.
+
+The limits are real:
+
+- Jev recall falls back to basic local recall when the descriptors it needs do not exist yet.
+- If TypeSafe is unreachable, learning can continue without the additional Jev verification step.
+- Live Jev retrieval quality is not yet verified.
+
+That is why Moki exposes recall history, learning runs, evidence, revisions, and fallback status instead of pretending the context pipeline is magic.
+
+## Privacy and control
+
+Moki's current rules are deliberately explicit:
+
+| Capability | Default | What leaves your Mac when enabled |
+| --- | --- | --- |
+| Basic memory recall | Off | Nothing. Retrieval is local. |
+| Automatic learning | Off | Bounded conversation excerpts go to your selected chat provider. |
+| Jev memory routing | Off | The request, bounded recent evidence, and bounded topic/entity descriptors go to TypeSafe. |
+| Jev learning verification | Requires a saved TypeSafe key | Bounded source excerpts and proposed facts go to TypeSafe. |
+| Smart tool loading | Off | Bounded message context plus tool names and short descriptions go to TypeSafe. Tool schemas and attachments are not sent. |
+| Public web fetch | Always available, no prompt | The requested URL, request headers, and normal network metadata go to the destination server. Local and private destinations are blocked. |
+
+MCP servers receive whatever an enabled tool call sends them. Review connections and tool switches before using them.
+
+## Other current features
+
+- streamed Markdown replies;
+- conversation history in SQLite;
+- per-conversation model selection and thinking level;
+- screenshot questions with model-gated image input;
+- native push-to-talk dictation on macOS;
+- edit, resend, or unsend your messages;
+- a context-usage estimate for the next turn;
+- built-in search across older conversations;
+- separate chat, history, settings, and learning-review windows.
+
+## Build it locally
+
+### Requirements
+
+- macOS
+- Bun **1.4.0**
+- Xcode command-line tools
 
 ```sh
 bun install
@@ -50,23 +147,18 @@ bun run build
 bun run desktop
 ```
 
-`desktop` opens the native application, not a development server. Closing its window hides it; use the tray or Dock to reopen. Use Quit to stop the app and background process.
+`desktop` opens the Electron application. It does not start a development server. Closing the window hides Moki; use the tray, Dock, or Quit action to reopen or stop it.
+
+### Connect the pieces
+
+1. Open **Settings > Providers**.
+2. Add a DeepSeek API key or sign in with your ChatGPT account for Codex.
+3. Optionally add a TypeSafe API key for Jev.
+4. Open **Settings > Connections** and add the MCP servers you want Moki to use.
+5. Open **Settings > Memory** and explicitly enable recall, learning, or Jev routing if you want to test them.
+6. Choose the chat provider and model under **Settings > Moki**, then start a conversation.
 
 ## Development
-
-Run `bun run dev` to build the isolated Electron shell/backend, start Vite on `127.0.0.1:5173`, and open **Moki Dev** with detached DevTools. Right-click **Inspect Element**, or press **Cmd+Option+I**, in chat, Settings, or History.
-
-Imports use path aliases only, never relative paths: `@shared/*`, `@renderer/*`, `@electron/*`, `@backend/*`, `@scripts/*`. They are defined once in `tsconfig.json` and honored by TypeScript, Bun (runtime and bundler), and the Vite dev server.
-
-On macOS, the first run prepares the ignored `dist/dev-shell/Moki Dev.app` with the stable bundle identifier `app.moki.desktop.dev` and a Screen Recording usage description. Grant Screen Recording to that exact app, not `node_modules/electron/dist/Electron.app`. After changing the permission, fully quit and rerun `bun run dev`. The cached app is rebuilt only when its preparation revision or Electron version changes.
-
-React component and CSS changes hot reload. Source maps expose TSX in DevTools. Changes to Electron, preload, backend, or build configuration require stopping and rerunning `bun run dev`. Some shared-module edits cause a full page reload, which resets unsent drafts.
-
-Development uses a separate `Moki Dev` profile with its own chats and provider connections. Connect providers separately in its Settings. Normal `bun run desktop` and packaged builds remain server-free and use their existing data. The server uses a fixed port and refuses to start if it is occupied. Ctrl+C or quitting the dev app stops the server too.
-
-`bun run build:dev` builds only the dev shell/backend without starting anything. Production renderer CSP stays unchanged; only the development HTML permits Vite's inline refresh preamble and loopback WebSocket connection.
-
-## Focused verification
 
 ```sh
 bun run typecheck
@@ -75,32 +167,60 @@ bun run test:foundation
 bun run package:dir
 ```
 
-The tests require a preceding build. They exercise only the foundation: validation, SQLite persistence, compiled runtime startup with an empty PATH, Čapek import, pipe requests, and shutdown. They do not open Electron windows or call model providers.
+The foundation checks are offline. They do not prove live provider access, a real MCP connection, native permission flows, Jev retrieval quality, or the packaged GUI. Those still require focused or manual verification.
 
-On Apple Silicon, the local package is `release/mac-arm64/Moki.app`. To test the actual bundled backend:
+For renderer development:
 
 ```sh
-MOKI_TEST_BINARY="release/mac-arm64/Moki.app/Contents/Resources/backend/moki-runtime" bun run test:foundation
+bun run dev
 ```
 
-Builds target the current machine's architecture. Cross-architecture packaging is not supported by this script yet. Local builds refresh the compiled Bun executable's ad-hoc signature. The outer app is unsigned, uses the default Electron icon, and is **not ready for public distribution**. Developer ID signing, hardened-runtime verification, notarization, and Intel verification remain release work.
+This starts Vite on `127.0.0.1:5173` and opens the separate **Moki Dev** app profile. Production builds remain server-free.
 
-## Rename compatibility
+Imports use path aliases only:
 
-The checkout directory is unchanged. New installs use the `Moki` Electron profile and `moki.sqlite`. Existing `Povondra`/`povondra` profiles and `povondra.sqlite` are reused in place, without copying or deleting data. Ambiguous profiles/databases stop startup rather than choosing a history silently. Existing companion IDs, customized names, avatars, and historical message attribution remain intact; the old default companion display name becomes Moki. Saved appearance preferences fall back to the legacy keys. Encrypted provider files are retained, but macOS Keychain access under the new application identity needs native verification.
+```text
+@shared/*
+@renderer/*
+@electron/*
+@backend/*
+@scripts/*
+```
 
-The backend now requires `MOKI_DATA_DIR`. Rebuild before launching; existing release artifacts are not renamed in place.
+## Architecture
 
-## Layout
+```text
+src/electron   Electron windows, tray, native permissions, encrypted credentials
+src/backend    Bundled Bun runtime, chat loop, MCP clients, memory, SQLite
+src/renderer   React interface with no direct network or filesystem access
+src/shared     Typed IPC contracts and runtime validation
+src/native     macOS dictation helper
+tests          Focused offline and source-level checks
+```
 
-- `src/electron`: windows/tray, sandboxed preload, private runtime transport.
-- `src/backend`: bundled Bun process and SQLite persistence in Electron's userData directory.
-- `src/renderer`: React conversation and assistant UI; no network or filesystem access.
-- `src/shared`: typed IPC contract; backend validates incoming values at runtime.
-- `docs/plans`: product direction and bounded implementation slices.
+Moki is built with Electron, React, TypeScript, Bun, Čapek model adapters, the AI SDK, and TypeSafe's SDK.
 
-Jean2's `bunfig.toml` is copied unchanged, including the three-day dependency release cooldown and Čapek exclusions. Only Electron's install script is trusted. The blocked `electron-winstaller` install script is not needed for this macOS slice.
+## Current boundaries
 
-Chat checks: `bun test tests/chat.test.ts tests/model-stream.test.ts tests/provider-refresh.test.ts`. These cover additive data migration, streamed persistence/cancellation, stale events, fixed credential endpoints, actual adapter payloads for both providers, and refresh races. No live credentials or provider calls are used.
+Before trying Moki, know what it is not yet:
 
-Next: full agent/tool execution, MCP integration, knowledge scope, and computer-use permissions from the product plan.
+- not signed, notarized, or ready for public macOS distribution;
+- not production-hardened;
+- not verified on Intel Macs;
+- not equipped with per-call computer-use permission prompts;
+- not able to accept arbitrary file attachments;
+- not proof that the current memory or Jev approach is the right one.
+
+The point of the project is to make those experiments concrete enough to inspect, run, break, and improve.
+
+## Contributing
+
+Issues and focused pull requests are welcome. Please describe the behavior you observed, the behavior you expected, and how you verified the change.
+
+This is a young, solo-maintained project. Small changes with clear boundaries are much easier to review than broad rewrites.
+
+## License
+
+All source code in this repository is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+
+The repository does not include a local copy of the license text yet. The linked canonical terms apply.
