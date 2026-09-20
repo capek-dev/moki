@@ -14,6 +14,12 @@ const api: DesktopAPI = {
     return () => ipcRenderer.removeListener('moki:runtime-error', handler);
   },
   providers: (command) => ipcRenderer.invoke('moki:providers', command),
+  browserExtensionState: () => ipcRenderer.invoke('moki:browser-extension'),
+  onBrowserExtension: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state);
+    ipcRenderer.on('moki:browser-extension-state', handler);
+    return () => ipcRenderer.removeListener('moki:browser-extension-state', handler);
+  },
   mcpAuth: (command) => ipcRenderer.invoke('moki:auth', command),
   speak: (text) => ipcRenderer.invoke('moki:speak', text),
   stopSpeaking: () => ipcRenderer.invoke('moki:stop-speaking'),

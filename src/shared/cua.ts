@@ -36,7 +36,12 @@ const LABELS: Record<string, string> = {
   zoom: 'Zooming in',
   get_browser_state: 'Reading the browser',
   browser_prepare: 'Preparing the browser',
+  browser_read_active_tab: 'Reading a browser tab',
+  browser_discover_elements: 'Finding page controls',
+  browser_dom_action: 'Using a web page',
   browser_navigate: 'Opening a web page',
+  browser_tab_manage: 'Managing browser tabs',
+  browser_screenshot: 'Capturing a browser tab',
   browser_click: 'Clicking on a page',
   browser_type: 'Typing on a page',
   browser_dialog: 'Handling a dialog',
@@ -69,6 +74,7 @@ export function describeCuaCall(name: string, args: unknown): string {
   const preferred = name === 'hotkey' || name === 'press_key' ? pick('keys', 'key')
     : name === 'type_text' || name === 'browser_type' ? pick('text')
     : name === 'browser_navigate' ? pick('url')
+    : name === 'browser_dom_action' || name === 'browser_tab_manage' ? pick('action', 'selector', 'text')
     : name === 'launch_app' ? pick('name', 'bundle_id')
     : name === 'invoke_menu' ? pick('path')
     : pick('text', 'url', 'query', 'name', 'path', 'action', 'direction');

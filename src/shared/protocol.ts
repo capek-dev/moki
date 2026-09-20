@@ -2,6 +2,7 @@ import type { Thinking } from '@shared/models';
 import type { ContextTurn, ContextUsage } from '@shared/context';
 import type { MemoryConnectionsPage, MemoryDetail, MemoryMutationAttribution, MemoryPage, MemoryRecallHistoryPage, MemoryRecallInspection, MemorySettingsState } from '@shared/memory';
 import type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningSettingsState, LearningRunSummary } from '@backend/memory-learning';
+import type { BrowserExtensionState } from '@shared/browser-extension';
 export type { MemoryConnectionsPage, MemoryDetail, MemoryMutationAttribution, MemoryPage, MemoryRecallHistoryPage, MemoryRecallInspection, MemorySettingsState } from '@shared/memory';
 export type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningRunSummary, LearningSettingsState } from '@backend/memory-learning';
 export type Provider = 'deepseek' | 'codex';
@@ -113,6 +114,8 @@ export interface DesktopAPI {
   chat(request: ChatRequest): Promise<Result>;
   onRuntimeError(listener: (message: string) => void): () => void;
   providers(command: ProviderCommand): Promise<ProviderState>;
+  browserExtensionState(): Promise<BrowserExtensionState>;
+  onBrowserExtension(listener: (state: BrowserExtensionState) => void): () => void;
   mcpAuth(command: McpAuthCommand): Promise<McpAuthResult>;
   speak(text: string): Promise<void>;
   stopSpeaking(): Promise<void>;

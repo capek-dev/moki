@@ -2,6 +2,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { ChatRequest, Request, Result } from '@shared/protocol';
 import type { Credentials } from '@backend/chat';
+import { isBrowserExtensionCall, type BrowserExtensionCall } from '@shared/browser-extension';
+
+export interface BrowserExtensionRuntime {
+  call(call: BrowserExtensionCall): Promise<unknown>;
+  cancel(callId: string): void;
+}
 
 export class Runtime {
   private child: ChildProcessWithoutNullStreams;
@@ -9,7 +15,7 @@ export class Runtime {
   private stopped = false;
   private closing?: Promise<void>;
   readonly ready: Promise<void>;
-  constructor(executable: string, dataDir: string, private changed: (result: Result) => void = () => {}, private failed: (message: string) => void = () => {}, private learningDue: (due: { runId: string; provider: 'deepseek' | 'codex'; model: string }) => void = () => {}, environment: NodeJS.ProcessEnv = process.env) {
+  constructor(executable: string, dataDir: string, private changed: (result: Result) => void = () => {}, private failed: (message: string) => void = () => {}, private learningDue: (due: { runId: string; provider: 'deepseek' | 'codex'; model: string }) => void = () => {}, environment: NodeJS.ProcessEnv = process.env, private browserExtension?: BrowserExtensionRuntime) {
     this.child = spawn(executable, [], {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -40,6 +46,8 @@ export class Runtime {
           }
            if (response.event === 'state') { this.changed(response.result); return; }
            if (response.event === 'learning-due' && typeof response.runId === 'string' && (response.provider === 'deepseek' || response.provider === 'codex') && typeof response.model === 'string') { this.learningDue({ runId: response.runId, provider: response.provider, model: response.model }); return; }
+           if (response.event === 'browser-extension-cancel' && typeof response.callId === 'string') { this.browserExtension?.cancel(response.callId); return; }
+           if (response.event === 'browser-extension-call') { this.handleBrowserCall(response.call); return; }
            const item = this.pending.get(response.id);
           if (!item) return;
           this.pending.delete(response.id); clearTimeout(item.timer);
@@ -52,6 +60,13 @@ export class Runtime {
     // desktop` and `dev`); the renderer never sees stderr. All backend logging
     // uses console.error so the stdout JSON-line protocol stays clean.
     createInterface({ input: this.child.stderr }).on('line', (line) => { if (line.trim()) process.stderr.write(line + '\n'); });
+  }
+  private handleBrowserCall(value: unknown) {
+    if (!isBrowserExtensionCall(value)) return;
+    const call = value;
+    void (this.browserExtension?.call(call) ?? Promise.reject(new Error('Browser extension bridge is unavailable.')))
+      .then((result) => this.push({ event: 'browser-extension-result', callId: call.callId, result }))
+      .catch((error) => this.push({ event: 'browser-extension-result', callId: call.callId, error: error instanceof Error ? error.message : 'Browser extension call failed.' }));
   }
   startChat(request: ChatRequest, credentials: Credentials, toolLoading?: import('@shared/tool-loading').ToolLoadingConfig): Promise<Result> {
     return this.send({ method: 'startChat', conversationId: request.conversationId, text: request.text, model: request.model, thinking: request.thinking, attachmentIds: request.attachmentIds, editOf: request.editOf, credentials, toolLoading, memoryJevKey: toolLoading?.key });

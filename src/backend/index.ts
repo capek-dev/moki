@@ -5,6 +5,8 @@ import { Store } from '@backend/store';
 import { Chat } from '@backend/chat';
 import { Cua, mcpTransport, type Toolbag } from '@backend/cua';
 import { Mcp } from '@backend/mcp';
+import { BrowserExtension } from '@backend/browser-extension';
+import { BROWSER_EXTENSION_URL, type BrowserExtensionState } from '@shared/browser-extension';
 import { generate } from '@backend/model-stream';
 import { observeLearningReview } from '@backend/learning-review-stream';
 import { smartToolbag } from './tool-scoring';
@@ -37,7 +39,7 @@ const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ 
   // Each source degrades independently: one broken connection never removes
   // the other's tools from the turn.
   const bags: Toolbag[] = [];
-  for (const load of [() => cua.toolbag(signal), () => mcp.toolbag(signal)]) {
+  for (const load of [() => browserExtension.toolbag(signal), () => cua.toolbag(signal), () => mcp.toolbag(signal)]) {
     try { bags.push(await load()); }
     catch (error) { console.error(`[moki] tool source unavailable, continuing without it: ${error instanceof Error ? error.message : String(error)}`); }
   }
@@ -52,6 +54,12 @@ const chat = new Chat(store, generate, (result) => console.log(JSON.stringify({ 
 ]), () => store.memoryConfig());
 const cua = new Cua(store, mcpTransport());
 const mcp = new Mcp(dataDir, store);
+const browserExtension = new BrowserExtension(
+  (call) => console.log(JSON.stringify('cancelCallId' in call
+    ? { event: 'browser-extension-cancel', callId: call.cancelCallId }
+    : { event: 'browser-extension-call', call })),
+  { connected: false, url: BROWSER_EXTENSION_URL, clientId: null, capabilities: [], error: null },
+);
 // Catalog fetches spawn a short-lived MCP transport, so these complete async;
 // responses carry their request id and the runtime matches them in any order.
 async function handleCua(id: string, request: { method: 'cuaTools' } | { method: 'cuaSetTool'; tool: unknown; disabled: unknown } | { method: 'cuaSetEnabled'; enabled: unknown }) {
@@ -112,10 +120,21 @@ const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
 lines.on('line', (line) => {
   let id: unknown;
   try {
-    if (Buffer.byteLength(line) > 128 * 1024) throw new Error('Request too large.');
+    const lineBytes = Buffer.byteLength(line);
+    if (lineBytes > 8 * 1024 * 1024) throw new Error('Request too large.');
     const envelope = JSON.parse(line);
+    if (lineBytes > 128 * 1024 && envelope?.event !== 'browser-extension-result') throw new Error('Request too large.');
     id = envelope?.id;
-    // Push events from Electron main (sign-in header overlays) carry no id.
+    // Push events from Electron main carry no id.
+    if (envelope?.event === 'browser-extension-state') {
+      const state = envelope.state as BrowserExtensionState | undefined;
+      if (state && typeof state.connected === 'boolean' && typeof state.url === 'string' && (state.clientId === null || typeof state.clientId === 'string') && Array.isArray(state.capabilities) && state.capabilities.every((item) => typeof item === 'string') && (state.error === null || typeof state.error === 'string')) browserExtension.setState(state);
+      return;
+    }
+    if (envelope?.event === 'browser-extension-result') {
+      browserExtension.receive(envelope as { event: string; callId: string; result?: unknown; error?: string });
+      return;
+    }
     if (envelope?.event === 'mcp-auth') {
       if (typeof envelope.server === 'string' && envelope.server && (envelope.headers === null || (typeof envelope.headers === 'object' && !Array.isArray(envelope.headers)))) {
         mcp.setAuthHeaders(envelope.server, envelope.headers as Record<string, string> | null);

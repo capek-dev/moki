@@ -1,6 +1,15 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
+import * as events from 'node:events';
+import * as http from 'node:http';
+import * as https from 'node:https';
+import * as net from 'node:net';
+import * as tls from 'node:tls';
+import * as stream from 'node:stream';
+import * as zlib from 'node:zlib';
+import * as buffer from 'node:buffer';
+import * as util from 'node:util';
 import { PassThrough, Writable } from 'node:stream';
 import { runInNewContext } from 'node:vm';
 import * as path from 'node:path';
@@ -28,6 +37,11 @@ test('preload strips Electron events and removes subscriptions', () => {
   ipc.emit('moki:tool-loading-state', { privileged: true }, { enabled: true, maxDirect: 12, configured: true });
   expect(loading).toEqual([[{ enabled: true, maxDirect: 12, configured: true }]]);
   stop(); expect(ipc.listenerCount('moki:tool-loading-state')).toBe(0);
+  const browser: unknown[] = [];
+  const stopBrowser = api.onBrowserExtension((...args: unknown[]) => browser.push(args));
+  ipc.emit('moki:browser-extension-state', { privileged: true }, { connected: true, url: 'http://127.0.0.1:8751' });
+  expect(browser).toEqual([[{ connected: true, url: 'http://127.0.0.1:8751' }]]);
+  stopBrowser(); expect(ipc.listenerCount('moki:browser-extension-state')).toBe(0);
 });
 
 // Execute the actual bundle with a private Electron/process harness. No global
@@ -94,11 +108,12 @@ test.each([{ development: false, packaged: false }, { development: true, package
       rmSync() {},
       mkdirSync(dir: string, options: unknown) { expect(options).toEqual({ recursive: true, mode: 0o700 }); expect(dir.startsWith('/unused/')).toBe(true); },
     }, 'node:http': {},
+    events: Object.assign(EventEmitter, events), http, https, net, tls, stream, zlib, buffer, crypto: nodeCrypto, url, util,
     'node:child_process': { spawn: () => child },
   };
   runInNewContext(readFileSync('dist/electron/main.cjs', 'utf8'), {
     require: (name: string) => { if (!(name in modules)) throw new Error(name); return modules[name]; },
-    process: Object.assign(new EventEmitter(), { env: { MOKI_DEV: development || packaged ? '1' : undefined }, resourcesPath: '/unused' }), crypto, Buffer, setTimeout, clearTimeout,
+    process: Object.assign(new EventEmitter(), { env: { MOKI_DEV: development || packaged ? '1' : undefined, MOKI_DISABLE_BROWSER_EXTENSION: '1' }, resourcesPath: '/unused' }), crypto, Buffer, setTimeout, clearTimeout, setInterval, clearInterval,
     fetch: () => { throw new Error('Unexpected network'); },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -127,6 +142,7 @@ test.each([{ development: false, packaged: false }, { development: true, package
     expect(windows[1].focused).toBe(1);
     expect(windows[1].webContents.mainFrame.url).toEndWith('#settings');
     expect(windows[1].options.webPreferences.sandbox).toBe(true);
+    expect(handlers.get('moki:browser-extension')!(event(windows[1]))).toMatchObject({ connected: false, url: 'http://127.0.0.1:8751' });
     expect(handlers.get('moki:tool-loading')!(event(windows[1]), { action: 'status' })).toEqual({ enabled: false, maxDirect: 12, configured: false });
     expect(windows[0].webContents.sent.at(-1).channel).toBe('moki:tool-loading-state');
     await handlers.get('moki:history')!(event(windows[0]));

@@ -11,6 +11,8 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { parseMcpConfig } from '@shared/mcp';
 import { pathToFileURL } from 'node:url';
 import { Runtime } from '@electron/runtime';
+import { BrowserExtensionHost } from '@electron/browser-extension-host';
+import type { BrowserExtensionState } from '@shared/browser-extension';
 import { LearningReviewCache } from '@electron/learning-review-cache';
 import { requireThinking } from '@shared/models';
 import type { ChatRequest, Request, Result } from '@shared/protocol';
@@ -64,6 +66,7 @@ let tray: Tray | undefined;
 let runtime: Runtime | undefined;
 let providers: ProviderConnections | undefined;
 let mcpAuth: import('@electron/mcp-connections').McpConnections | undefined;
+let browserExtension: BrowserExtensionHost | undefined;
 let capture: ScreenshotCapture | undefined;
 let speech: SpeechSynth | undefined;
 let dictation: DictationService | undefined;
@@ -79,6 +82,10 @@ const glassWindow = process.platform === 'darwin'
 const appRoot = app.getAppPath();
 const page = join(appRoot, 'dist/renderer/index.html');
 function show() { window?.show(); window?.focus(); }
+function browserExtensionChanged(state: BrowserExtensionState) {
+  for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:browser-extension-state', state);
+  void runtime?.push({ event: 'browser-extension-state', state }).catch((error) => console.error('[moki] browser extension state push failed:', error instanceof Error ? error.message : String(error)));
+}
 function secureWindow(target: BrowserWindow, hash = '') {
   registered.set(target, (development ? DEV_ORIGIN + '/' : pathToFileURL(page).href) + hash);
   if (development) {
@@ -174,6 +181,11 @@ else {
       ? join(process.resourcesPath, 'native/moki-dictate')
       : join(appRoot, 'dist/native/moki-dictate');
     const commandEnvironment = await localCommandEnvironment();
+    browserExtension = new BrowserExtensionHost(browserExtensionChanged);
+    if (process.env.MOKI_DISABLE_BROWSER_EXTENSION !== '1') {
+      try { await browserExtension.start(); }
+      catch (error) { console.error('[moki] browser extension bridge unavailable:', error instanceof Error ? error.message : String(error)); }
+    }
     runtime = new Runtime(binary, app.getPath('userData'), broadcast, (message) => {
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:runtime-error', message);
     }, (due) => {
@@ -193,8 +205,9 @@ else {
           reviewCache.finish(due.runId);
         }
       })();
-    }, commandEnvironment);
+    }, commandEnvironment, browserExtension);
     await runtime.ready;
+    await runtime.push({ event: 'browser-extension-state', state: browserExtension.state() });
     // Sign-ins from previous sessions keep working: push their headers into
     // the backend before anything fetches a catalog.
     mcpAuth = new (await import('@electron/mcp-connections')).McpConnections(
@@ -244,6 +257,11 @@ else {
       const state = toolLoading.handle(command);
       for (const target of registered.keys()) if (!target.isDestroyed()) target.webContents.send('moki:tool-loading-state', state);
       return state;
+    });
+    ipcMain.handle('moki:browser-extension', (event) => {
+      assertTrusted(event);
+      if (event.sender !== settings?.webContents) throw new Error('Browser extension status is only available in Settings.');
+      return browserExtension!.state();
     });
     ipcMain.handle('moki:providers', (event, command: unknown) => {
       assertTrusted(event);
@@ -400,6 +418,6 @@ else {
     mcpAuth?.close();
     speech?.close();
     dictation?.close();
-    void (runtime?.close() ?? Promise.resolve()).finally(() => { shutdownComplete = true; app.quit(); });
+    void Promise.all([browserExtension?.close() ?? Promise.resolve(), runtime?.close() ?? Promise.resolve()]).finally(() => { shutdownComplete = true; app.quit(); });
   });
 }

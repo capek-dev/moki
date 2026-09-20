@@ -2,7 +2,7 @@ import { jsonSchema, stepCountIs, streamText, tool } from 'ai';
 import { createOpenAiResponsesModel } from '@capekai/core/providers';
 import { getModelWithMetadata } from '@capekai/core/execution';
 import { createSingleModelConfiguration, withRuntimeConfiguration } from '@capekai/core/configuration';
-import { describeError, type Generate } from '@backend/chat';
+import { describeError, type Generate, type TurnToolOutput } from '@backend/chat';
 import { requireModel, requireThinking } from '@shared/models';
 import { estimateModelContext, ContextBudgetError, type ContextUpdate } from '@shared/context';
 import { formatClockContext, systemClock, withClockContext, type Clock } from '@shared/clock';
@@ -55,6 +55,7 @@ export function createGenerate(fetcher: typeof fetch = fetch, clock: Clock = sys
         description: entry.description || entry.name,
         inputSchema: jsonSchema(entry.inputSchema as Parameters<typeof jsonSchema>[0]),
         execute: (args: unknown) => entry.execute(args),
+        toModelOutput: ({ output }: { output: string | TurnToolOutput }) => typeof output === 'string' ? { type: 'text', value: output } : output.modelOutput,
       })]))
     : undefined;
   const stream = streamText({

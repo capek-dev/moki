@@ -5,7 +5,7 @@ import { Store, text } from '@backend/store';
 import { requireThinking, type Thinking } from '@shared/models';
 import type { Attachment, Provider, Result, Message, ToolCallRecord } from '@shared/protocol';
 import { requireAttachmentId } from '@shared/attachments';
-import type { Toolbag } from '@backend/cua';
+import type { ModelToolOutput, Toolbag } from '@backend/cua';
 import { SESSION_SEARCH_GUIDANCE } from '@backend/session-search-tool';
 import { MEMORY_TOOL_GUIDANCE } from '@backend/memory-tool';
 import { assembleTurnInstructions, DEFAULT_MEMORY_HOST_CONFIG, recallBasic, type BasicRecallResult, type MemoryHostConfig } from '@backend/memory-recall';
@@ -30,7 +30,8 @@ export function describeError(error: unknown, depth = 0): string {
 
 // Private pipe contract, never exposed through the renderer's request union.
 export type Credentials = { provider: 'deepseek'; key: string } | { provider: 'codex'; access: string; accountId: string };
-export interface TurnTool { name: string; description: string; inputSchema: unknown; execute(args: unknown): Promise<string> }
+export interface TurnToolOutput { text: string; modelOutput: ModelToolOutput }
+export interface TurnTool { name: string; description: string; inputSchema: unknown; execute(args: unknown): Promise<string | TurnToolOutput> }
 export interface Turn {
   conversationId: string;
   thinking?: Thinking | null;
@@ -46,7 +47,7 @@ export interface Turn {
     onUpdate(update: ContextUpdate): void;
   };
 }
-export type Generate = (turn: Turn, signal: AbortSignal) => AsyncIterable<string>;
+export type Generate = (turn: Turn, signal: AbortSignal) => AsyncIterable<string | TurnToolOutput>;
 export type BuiltInForegroundSource = { sourceMessageId: string; sourceRevision: number };
 export type BuiltInToolSource = (conversationId: string, signal: AbortSignal, foregroundSource?: BuiltInForegroundSource) => Toolbag | Promise<Toolbag>;
 export function history(messages: Message[], attachments: Attachment[] = [], readImage?: (id: string) => Uint8Array) {
@@ -190,7 +191,7 @@ export class Chat {
         }
         const tools = definitions.map((definition) => ({
           ...definition,
-          execute: async (args: unknown): Promise<string> => {
+          execute: async (args: unknown): Promise<string | TurnToolOutput> => {
             abort.signal.throwIfAborted();
             // App-connection tools carry a `__` prefix separator; Cua names do not.
             const appTool = definition.name.includes('__');
@@ -201,7 +202,8 @@ export class Chat {
               const result = await owners.get(definition.name)!.execute(definition.name, args);
               entry.status = result.isError ? 'failed' : 'ok';
               entry.summary = summarizeToolText(result.text);
-              return result.isError ? `Tool error: ${result.text.slice(0, 2000)}` : result.text;
+              if (result.isError) return `Tool error: ${result.text.slice(0, 2000)}`;
+              return result.modelOutput ? { text: result.text, modelOutput: result.modelOutput } : result.text;
             } catch (error) {
               if (abort.signal.aborted) throw error;
               entry.status = 'failed';
@@ -322,8 +324,9 @@ export class Chat {
         };
         for await (const delta of this.generate(turn, abort.signal)) {
           if (finished || abort.signal.aborted) return;
-          if (output.length + delta.length > 64000) { abort.abort(); finish('failed', 'Reply reached the size limit. Ask for a shorter answer.'); return; }
-          output += delta;
+          const textDelta = typeof delta === 'string' ? delta : delta.text;
+          if (output.length + textDelta.length > 64000) { abort.abort(); finish('failed', 'Reply reached the size limit. Ask for a shorter answer.'); return; }
+          output += textDelta;
           if (!timer) timer = setTimeout(flush, 60);
         }
         if (!finished) finish(abort.signal.aborted ? 'interrupted' : output ? 'complete' : 'failed', !output && !abort.signal.aborted ? 'The model returned no text. Try another model.' : null);

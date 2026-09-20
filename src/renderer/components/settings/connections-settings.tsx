@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { CuaState, McpState, McpServerState } from '@shared/protocol';
+import type { BrowserExtensionState } from '@shared/browser-extension';
 import { formatWeight, TOOL_SCHEMA_BUDGET } from '@shared/mcp';
 import { Button } from '@renderer/components/ui/button';
 import { Field, Input } from '@renderer/components/ui/field';
@@ -63,6 +64,7 @@ function ConnectionCard({ name, subtitle, status, on, dotOn, switchDisabled, onT
 // independently, so a slow Cua Driver never blocks the app list or vice
 // versa; the agent already receives both as one merged toolset.
 export function ConnectionsSettings() {
+  const [browserExtension, setBrowserExtension] = useState<BrowserExtensionState>();
   const [cua, setCua] = useState<CuaState>();
   const [cuaBusy, setCuaBusy] = useState(false);
   const [cuaError, setCuaError] = useState('');
@@ -98,7 +100,13 @@ export function ConnectionsSettings() {
     } catch (e) { setMcpError(e instanceof Error ? e.message : 'Connection failed.'); }
     finally { mcpLock.current = false; setMcpBusy(false); }
   }
-  useEffect(() => { void loadCua(); void loadMcp(); }, []);
+  useEffect(() => {
+    let active = true;
+    const stop = window.moki.onBrowserExtension((state) => setBrowserExtension(state));
+    void window.moki.browserExtensionState().then((state) => { if (active) setBrowserExtension(state); });
+    void loadCua(); void loadMcp();
+    return () => { active = false; stop(); };
+  }, []);
   async function toggleCuaTool(tool: string, disabled: boolean) {
     if (pending) return;
     setPending(tool); setCuaError('');
@@ -215,6 +223,21 @@ export function ConnectionsSettings() {
       {overBudget && <p className="text-[12.5px] text-ink-2" role="note">Many tools are connected. Moki loads the largest connections on demand, which adds a small step when it uses them. Turning off connections you rarely use keeps replies quickest.</p>}
       {mcp && servers.length === 0 && !cua && <p className="text-[12.5px] text-ink-2" role="status">Checking connections…</p>}
       <div className="grid gap-3">
+        <div className="grid gap-2 rounded-xl border border-ink-3/25 px-3 py-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-medium">Prokop Browser</p>
+              <p className="mt-0.5 inline-flex items-center gap-1.5 text-[12px] text-ink-2">
+                <span className={`h-2 w-2 rounded-full ${browserExtension?.connected ? 'bg-ok' : 'bg-ink-3/60'}`} aria-hidden="true" />
+                {browserExtension?.connected ? 'Connected' : browserExtension?.error ? 'Unavailable' : 'Waiting for extension'}
+              </p>
+            </div>
+            <span className="rounded-md bg-surface-2 px-2 py-1 font-mono text-[11.5px] text-ink-2">{browserExtension?.url ?? 'http://127.0.0.1:8751'}</span>
+          </div>
+          <p className="text-[12px] text-ink-3">Set this as the server URL in the Prokop Browser extension. Leave the API token empty.</p>
+          {browserExtension?.error && <p className="text-[12.5px] text-ink-2">{browserExtension.error}</p>}
+          {browserExtension?.connected && <p className="text-[12px] text-ink-3">Reading, navigation, page actions, tabs, and screenshots are available to Moki. Browser actions run directly without a permission prompt.</p>}
+        </div>
         <ConnectionCard
           name="Cua Driver"
           subtitle="Computer-use tools on this Mac"

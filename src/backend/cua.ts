@@ -20,10 +20,12 @@ export interface AgentToolDef { name: string; description: string; inputSchema: 
 // Per-turn execution bag: the filtered tool list plus name-based dispatch.
 // `weights` attributes the prompt cost per source label so an over-budget
 // merged bag can name its offenders (plan 18).
+export type ModelToolOutput = { type: 'content'; value: Array<{ type: 'text'; text: string } | { type: 'image-data'; data: string; mediaType: string }> };
+export interface ToolExecutionResult { text: string; isError: boolean; modelOutput?: ModelToolOutput }
 export interface Toolbag {
   tools: AgentToolDef[];
   weights?: readonly ToolWeightLabel[];
-  execute(name: string, args: unknown): Promise<{ text: string; isError: boolean }>;
+  execute(name: string, args: unknown): Promise<ToolExecutionResult>;
   close(): void;
 }
 
