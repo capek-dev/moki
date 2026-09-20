@@ -63,7 +63,7 @@ test('existing SQLite WAL history is opened in place, not replaced by an empty M
 
 test('custom legacy companion fields and avatars survive without an extra default companion', () => fixture((dir) => {
   const path = join(dir, 'legacy.sqlite');
-  const appearance = { ...INITIAL_APPEARANCE, palette: 'mint', outfit: 'suit' } as const;
+  const appearance = { ...INITIAL_APPEARANCE, palette: 'mint', outfit: 'work' } as const;
   const db = new Database(path);
   db.exec('CREATE TABLE assistants (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, instructions TEXT NOT NULL, appearance TEXT)');
   db.query('INSERT INTO assistants VALUES (?, ?, ?, ?, ?)').run('povondra', 'My friend', 'codex', 'Custom instructions', JSON.stringify(appearance));
