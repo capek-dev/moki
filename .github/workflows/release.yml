@@ -41,7 +41,7 @@ jobs:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REPOSITORY" = "cakep-dev/moki"
+          test "$GITHUB_REPOSITORY" = "capek-dev/moki"
           RELEASE_SHA=$(git rev-parse HEAD)
           test "$RELEASE_SHA" = "$GITHUB_SHA"
           PACKAGE_VERSION=$(bun -e "console.log(require('./package.json').version)")
@@ -125,7 +125,7 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" | grep -Fx 'app.moki.desktop'
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" | grep -Fx "$VERSION"
           grep -F 'provider: github' "$APP_FEED"
-          grep -F 'owner: cakep-dev' "$APP_FEED"
+          grep -F 'owner: capek-dev' "$APP_FEED"
           grep -F 'repo: moki' "$APP_FEED"
           grep -F "version: $VERSION" "$FEED"
           grep -F "Moki-${VERSION}-arm64-mac.zip" "$FEED"
