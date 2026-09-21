@@ -3,9 +3,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Store } from '@backend/store';
-import { Runtime } from '@electron/runtime';
+import { Runtime, runtimeRequestTimeoutMs } from '@electron/runtime';
 
 const binaryPath = resolve(process.env.MOKI_TEST_BINARY ?? 'dist/backend/moki-runtime');
+
+test('learning reviews get a transport deadline beyond their execution deadline', () => {
+  expect(runtimeRequestTimeoutMs({ method: 'learningRun' })).toBe(120_000);
+  expect(runtimeRequestTimeoutMs({ method: 'snapshot' })).toBe(15_000);
+  expect(runtimeRequestTimeoutMs(null)).toBe(15_000);
+});
 
 function withStore(run: (store: Store, path: string) => void) {
   const dir = mkdtempSync(join(tmpdir(), 'moki-test-'));

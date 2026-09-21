@@ -5,6 +5,7 @@ import type { Credentials, Generate } from '@backend/chat';
 import type { EvidenceModality, MemoryKind, MemoryRepository } from '@backend/memory-repository';
 import { MemoryGraphRepository, type EntityKind, type RelationshipKind } from '@backend/memory-graph-repository';
 import { assertSourceEvidenceAllowed } from '@backend/memory-repository';
+import { describeError } from '@backend/error-description';
 import { defaultModel, requireModel } from '@shared/models';
 
 export const LEARNING_IDLE_MS = 2 * 60_000;
@@ -723,7 +724,7 @@ export class MemoryLearningRepository {
 
   failRun(runId: string, error: unknown, cancelled = false, now = Date.now(), bumpAttempt = false) {
     const id = requireUuid(runId, 'learning run id');
-    const raw = error instanceof Error ? error.message : 'Learning review failed.';
+    const raw = error instanceof Error ? error.message : describeError(error);
     const message = /secret|token|api.?key|authorization|credential/i.test(raw) ? 'Learning provider request failed.' : raw.replace(/[\r\n]+/g, ' ').slice(0, 500) || 'Learning review failed.';
     this.db.transaction(() => {
       this.db.query('UPDATE learning_runs SET status = ?, error = ?, completedAt = ?, attempt = attempt + ? WHERE id = ? AND status IN (\'pending\', \'running\')').run(cancelled ? 'cancelled' : 'failed', message, now, bumpAttempt ? 1 : 0, id);

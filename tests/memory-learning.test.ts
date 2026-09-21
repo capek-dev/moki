@@ -157,6 +157,23 @@ test('failed review retries after restart with the same future-only cursor and a
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('unknown review failures persist useful details and redact credentials', async () => {
+  const store = new Store(':memory:');
+  try {
+    const id = conversation(store);
+    enable(store);
+    store.handle({ method: 'saveMessage', conversationId: id, text: 'Review this later.' });
+    const coordinator = new LearningCoordinator(store.learningRepository, { learningDue: () => {} }, fakeClock().clock);
+    await coordinator.run(async () => { throw { message: 'Rate limit exceeded', statusCode: 429 }; });
+    const failed = store.learningRepository.listRuns().runs[0];
+    expect(failed).toMatchObject({ status: 'failed', error: 'Rate limit exceeded · status 429' });
+    store.learningRepository.retryRun(failed.id, 2000);
+    await coordinator.run(async () => { throw 'Authorization token invalid: sensitive-value'; }, undefined, failed.id);
+    expect(store.learningRepository.getRun(failed.id)).toMatchObject({ status: 'failed', error: 'Learning provider request failed.' });
+    coordinator.close();
+  } finally { store.close(); }
+});
+
 test('model reviewer uses fake credentials, emits constrained JSON, and exposes no tools', async () => {
   const source = { rowid: 1, id: 'source-1', conversationId: 'conversation-1', role: 'user' as const, text: 'I prefer tea.', revision: 1, createdAt: 1000 };
   let seen: { credentials: unknown; tools: unknown } | undefined;

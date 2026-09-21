@@ -9,6 +9,15 @@ export interface BrowserExtensionRuntime {
   cancel(callId: string): void;
 }
 
+const RUNTIME_REQUEST_TIMEOUT_MS = 15_000;
+const LEARNING_RUN_REQUEST_TIMEOUT_MS = 120_000;
+
+export function runtimeRequestTimeoutMs(request: unknown): number {
+  return request && typeof request === 'object' && (request as { method?: unknown }).method === 'learningRun'
+    ? LEARNING_RUN_REQUEST_TIMEOUT_MS
+    : RUNTIME_REQUEST_TIMEOUT_MS;
+}
+
 export class Runtime {
   private child: ChildProcessWithoutNullStreams;
   private pending = new Map<string, { resolve: (result: Result) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
@@ -93,7 +102,10 @@ export class Runtime {
     if (Buffer.byteLength(payload) > 128 * 1024) throw new Error('Request too large.');
     const { id } = JSON.parse(payload) as { id: string };
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Request timed out. No automatic retry was made.')); }, 15000);
+      // Learning reviews have their own 60-second execution bound. Keep the
+      // transport alive beyond that bound so it cannot report a false failure
+      // while the backend is still completing the review.
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Request timed out. No automatic retry was made.')); }, runtimeRequestTimeoutMs(request));
       this.pending.set(id, { resolve, reject, timer });
       this.child.stdin.write(payload + '\n', (error) => {
         if (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }

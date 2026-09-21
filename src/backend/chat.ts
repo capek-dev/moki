@@ -16,18 +16,9 @@ import { describeMcpCall, mcpToolLabel, ToolBudgetError } from '@shared/mcp';
 import type { ContextTurn, ContextUpdate, ContextUsage } from '@shared/context';
 import { countModelImages, createImageAccounting, estimateContextUsage } from '@shared/context';
 import { formatClockContext, systemClock, type Clock } from '@shared/clock';
+import { describeError } from '@backend/error-description';
 
-// Terminal diagnostics: the full error chain for the host process stderr.
-// Never surfaced to the renderer; credentials do not travel in error objects.
-export function describeError(error: unknown, depth = 0): string {
-  if (depth > 3 || !(error instanceof Error)) return String(error);
-  const status = (error as { statusCode?: number }).statusCode;
-  const parts = [error.name, error.message];
-  if (status !== undefined) parts.push(`status ${status}`);
-  const cause = (error as { cause?: unknown }).cause;
-  if (cause !== undefined) parts.push(`cause: ${describeError(cause, depth + 1)}`);
-  return parts.join(' · ');
-}
+export { describeError } from '@backend/error-description';
 
 // Private pipe contract, never exposed through the renderer's request union.
 export type Credentials = { provider: 'deepseek'; key: string } | { provider: 'codex'; access: string; accountId: string };

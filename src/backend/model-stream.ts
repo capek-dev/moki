@@ -2,7 +2,8 @@ import { jsonSchema, stepCountIs, streamText, tool } from 'ai';
 import { createOpenAiResponsesModel } from '@capekai/core/providers';
 import { getModelWithMetadata } from '@capekai/core/execution';
 import { createSingleModelConfiguration, withRuntimeConfiguration } from '@capekai/core/configuration';
-import { describeError, type Generate, type TurnToolOutput } from '@backend/chat';
+import type { Generate, TurnToolOutput } from '@backend/chat';
+import { describeError, normalizeError } from '@backend/error-description';
 import { requireModel, requireThinking } from '@shared/models';
 import { estimateModelContext, ContextBudgetError, type ContextUpdate } from '@shared/context';
 
@@ -105,7 +106,7 @@ export function createGenerate(fetcher: typeof fetch = fetch): Generate {
     // Terminal diagnostics only; the renderer keeps its generic messages.
     if (event.type === 'error') {
       console.error(`[moki] model stream error provider=${turn.provider} model=${turn.model}: ${describeError(event.error)}`);
-      throw event.error;
+      throw normalizeError(event.error);
     }
     if (event.type === 'finish' && event.finishReason !== 'stop') {
       // 'tool-calls' means the step budget ended the turn while the model

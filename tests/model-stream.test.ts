@@ -1,9 +1,17 @@
 import { expect, test } from 'bun:test';
 import { createGenerate, codexFetch } from '@backend/model-stream';
+import { describeError, normalizeError } from '@backend/error-description';
 import type { Turn } from '@backend/chat';
 import { createImageAccounting, type ContextUpdate } from '@shared/context';
 
 const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.6-sol', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: '<moki_turn_context>\nCurrent date/time: 2025-01-02T03:04:05; timezone: UTC; UTC: 2025-01-02T03:04:05.000Z.\n</moki_turn_context>\n\n<moki_user_message>\nAgain\n</moki_user_message>' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };
+
+test('unknown provider errors retain useful fields when normalized', () => {
+  const normalized = normalizeError({ name: 'APIError', message: 'Rate limit exceeded', statusCode: 429, cause: 'upstream busy' });
+  expect(normalized).toBeInstanceOf(Error);
+  expect(normalized.message).toBe('APIError · Rate limit exceeded · status 429 · cause: upstream busy');
+  expect(describeError('plain provider failure')).toBe('plain provider failure');
+});
 test('published DeepSeek adapter serializes history and streams in an isolated process', async () => {
   const child = Bun.spawn([process.execPath, 'run', 'tests/fixtures/deepseek-stream.ts'], { stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => child.kill(), 10000);
