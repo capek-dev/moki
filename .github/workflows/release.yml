@@ -154,23 +154,22 @@ jobs:
           ZIP="release/Moki-${VERSION}-arm64-mac.zip"
           FEED="release/latest-mac.yml"
           CHECKSUMS="release/Moki-${VERSION}-arm64.sha256"
-          NOTES=()
+          RELEASE_ARGS=(
+            "$TAG"
+            "$DMG" "$ZIP" "$FEED" "$CHECKSUMS"
+            --repo "$GITHUB_REPOSITORY"
+            --target "$RELEASE_SHA"
+            --title "Moki $VERSION"
+          )
           if [ -s "changelogs/app/v${VERSION}.md" ]; then
-            NOTES=(--notes-file "changelogs/app/v${VERSION}.md")
+            RELEASE_ARGS+=(--notes-file "changelogs/app/v${VERSION}.md")
           else
-            NOTES=(--generate-notes)
+            RELEASE_ARGS+=(--generate-notes)
           fi
-          PRERELEASE=()
           if [[ "$VERSION" == *-* ]]; then
-            PRERELEASE=(--prerelease)
+            RELEASE_ARGS+=(--prerelease)
           fi
-          gh release create "$TAG" \
-            "$DMG" "$ZIP" "$FEED" "$CHECKSUMS" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$RELEASE_SHA" \
-            --title "Moki $VERSION" \
-            "${NOTES[@]}" \
-            "${PRERELEASE[@]}"
+          gh release create "${RELEASE_ARGS[@]}"
           for asset in "$(basename "$DMG")" "$(basename "$ZIP")" "$(basename "$FEED")" "$(basename "$CHECKSUMS")"; do
             test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq ".assets[] | select(.name == \"$asset\") | .name")" = "$asset"
           done
