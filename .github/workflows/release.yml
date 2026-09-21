@@ -71,11 +71,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck and focused tests
+      - name: Build, typecheck, and run focused tests
         run: |
           set -euo pipefail
+          bun run build
           bun run typecheck
-          bun test tests/updater.test.ts tests/settings-window.test.ts
+          bun test tests/updater.test.ts tests/settings-window.test.ts --verbose
 
       - name: Import Apple certificate
         env:
@@ -104,7 +105,6 @@ jobs:
           set -euo pipefail
           IDENTITY=$(security find-identity -v -p codesigning "$CSC_KEYCHAIN" | grep "Developer ID Application" | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
           test -n "$IDENTITY"
-          bun run build
           ./node_modules/.bin/electron-builder --mac dmg zip --publish never \
             -c.mac.identity="$IDENTITY" \
             -c.mac.notarize=true
