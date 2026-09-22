@@ -55,3 +55,86 @@ test('example identity is explicitly separated from actual evidence and kinds ar
   expect(LEARNING_REVIEW_INSTRUCTIONS).toContain('Copy actual source and record revisions');
   expect(LEARNING_REVIEW_INSTRUCTIONS).not.toContain('Daniel');
 });
+
+test('reviewer performs an explicit graph pass using only connected, source-supported records', () => {
+  const instructions = LEARNING_REVIEW_INSTRUCTIONS;
+  expect(instructions).toContain('GRAPH PASS');
+  expect(instructions).toContain('After the memory pass');
+  expect(instructions).toContain('named person, project, product, organization, place, trip, or event');
+  expect(instructions).toContain('Generic concepts belong in memory topics');
+  expect(instructions).toContain('Create an explicit topic only');
+  expect(instructions).toContain('supersedes');
+  expect(instructions).toContain('contradicts');
+  expect(instructions).toContain('Do not infer a relationship from topical similarity alone');
+  expect(instructions).toContain('supplied existing memory IDs');
+  expect(instructions).toContain('Do not create an unattached topic or entity');
+  expect(instructions.indexOf('MEMORY PASS')).toBeLessThan(instructions.indexOf('GRAPH PASS'));
+  expect(instructions.indexOf('GRAPH PASS')).toBeLessThan(instructions.indexOf('OUTPUT CONTRACT'));
+});
+
+test('model reviewer accepts parser-aligned topic, entity, and relationship proposals', async () => {
+  const source = {
+    rowid: 1,
+    id: '11111111-1111-4111-8111-111111111111',
+    conversationId: 'conversation',
+    role: 'user' as const,
+    text: 'Moki is my macOS assistant project. Local storage is a requirement for it.',
+    revision: 1,
+    createdAt: 1,
+  };
+  const firstMemoryId = '22222222-2222-4222-8222-222222222222';
+  const secondMemoryId = '33333333-3333-4333-8333-333333333333';
+  const proposals: LearningProposal[] = [
+    {
+      kind: 'topic',
+      action: 'create',
+      sourceMessageId: source.id,
+      sourceRevision: source.revision,
+      sourceRole: 'user',
+      label: 'Moki development',
+      description: 'Work on the Moki assistant.',
+      memoryId: firstMemoryId,
+      expectedMemoryRevision: 2,
+    },
+    {
+      kind: 'entity',
+      action: 'create',
+      sourceMessageId: source.id,
+      sourceRevision: source.revision,
+      sourceRole: 'user',
+      entityKind: 'project',
+      label: 'Moki',
+      description: 'The user’s macOS assistant project.',
+      memoryId: firstMemoryId,
+      expectedMemoryRevision: 2,
+    },
+    {
+      kind: 'relationship',
+      action: 'create',
+      sourceMessageId: source.id,
+      sourceRevision: source.revision,
+      sourceRole: 'user',
+      relationshipKind: 'related_to',
+      subjectId: firstMemoryId,
+      objectId: secondMemoryId,
+      expectedSubjectRevision: 2,
+      expectedObjectRevision: 1,
+      provenance: 'The user directly connected local storage to Moki.',
+    },
+  ];
+
+  const parsed = await reviewWithModel(async function* (turn) {
+    const payload = JSON.parse(turn.messages[0].content as string);
+    expect(payload.currentRecords.memories).toHaveLength(2);
+    yield JSON.stringify({ proposals });
+  }, 'deepseek', 'deepseek-flash', { provider: 'deepseek', key: 'synthetic-not-used' }, 'synthetic-graph-review', [source], new AbortController().signal, {
+    memories: [
+      { id: firstMemoryId, revision: 2, kind: 'fact', text: 'The user is building Moki.' },
+      { id: secondMemoryId, revision: 1, kind: 'preference', text: 'The user requires local storage.' },
+    ],
+    topics: [],
+    entities: [],
+  });
+
+  expect(parsed).toEqual(proposals);
+});
