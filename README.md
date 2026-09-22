@@ -1,226 +1,141 @@
-# Moki
+<p align="center">
+  <img src="assets/brand/moki-scene-focused.svg" alt="Moki working on a laptop" width="260">
+</p>
 
-**A small personal assistant for testing how far memory, context, and large tool catalogs can go.**
+<h1 align="center">A desktop AI assistant with memory you can inspect.</h1>
 
-Moki is a macOS desktop assistant that starts simple: one chat, one assistant, and only the abilities you choose to connect through [MCP](https://modelcontextprotocol.io/).
+<p align="center">
+  Moki is an open-source macOS app for talking to AI models, connecting MCP tools, and keeping optional memory on your machine.
+</p>
 
-The experiment underneath is less simple. Moki is exploring whether an assistant can:
+<p align="center">
+  <a href="https://github.com/capek-dev/moki/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/capek-dev/moki?color=66b8a7"></a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-66b8a7"></a>
+  <a href="https://bun.sh"><img alt="Bun" src="https://img.shields.io/badge/runtime-Bun-66b8a7?logo=bun"></a>
+  <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-66b8a7?logo=typescript"></a>
+</p>
 
-- remember useful facts without turning every conversation into permanent memory;
-- keep evidence and revisions attached to what it learns;
-- retrieve context by meaning, topics, and entities instead of only text matches;
-- work with large MCP tool catalogs without placing every schema in every prompt;
-- remain understandable and controllable by the person using it.
+<p align="center">
+  <a href="https://github.com/capek-dev/moki/releases">Download</a> ·
+  <a href="#setup">Setup</a> ·
+  <a href="#development">Development</a>
+</p>
 
-> [!WARNING]
-> **Moki has just started.** It is evolving, macOS-first, solo-maintained, and not ready for public distribution. Memory quality, Jev-assisted retrieval, and large-catalog tool selection are active experiments, not solved problems.
+---
 
-## The idea
+## Why Moki
 
-A useful personal assistant needs more than a chat box.
+Most AI assistants hide how context and memory are assembled. Moki makes those parts visible and optional.
 
-It needs a model to think, tools to act, and memory to carry useful context forward. Moki keeps those parts separate:
+- **Bring your own model access:** Use a DeepSeek API key or sign in with ChatGPT for supported Codex models.
+- **Connect tools through MCP:** Add local `stdio` or remote HTTP servers, then enable only the connections and tools you want.
+- **Inspect memory:** See what Moki learned, which message supports it, why it was recalled, and remove it when it is wrong.
+- **Choose what runs:** Basic recall, automatic learning, Jev routing, and smart tool loading are separate settings. Memory features are off by default.
+- **Keep local control:** Conversations and memory live in local SQLite. There is no required Moki account or telemetry.
+
+Moki is maintained by one developer. It is early software, built for real use and continued experimentation rather than presented as production-hardened.
+
+## What Moki is not
+
+Moki is a personal desktop assistant, not a coding workspace, IDE, or autonomous employee. It does not run models locally, and using it still sends requests to the model providers and external tools you configure.
+
+Moki is probably not for you if you:
+
+- want a completely offline assistant or bundled local models;
+- need a turnkey product with models, tools, and cloud sync included;
+- need Windows, Linux, or verified Intel Mac support;
+- require enterprise support, centralized administration, or production-hardening guarantees;
+- do not want to manage provider credentials or decide which tools and memory features to enable.
+
+It is for people who want a macOS assistant they can configure, inspect, and keep under their control.
+
+## Download
+
+[Moki 0.1.0](https://github.com/capek-dev/moki/releases/tag/app/v0.1.0) is available for Apple Silicon as a Developer ID-signed and notarized DMG or zip. SHA-256 checksums are included with the release.
+
+Intel Macs are not currently verified.
+
+## Setup
+
+1. Open **Settings > Providers** and add a DeepSeek API key or sign in with ChatGPT.
+2. Optionally connect MCP servers under **Settings > Connections**.
+3. Choose a model under **Settings > Moki**.
+4. Start a conversation.
+
+Memory is optional. Enable basic recall or automatic learning separately under **Settings > Memory**. A TypeSafe key is only needed for optional Jev features.
+
+## How memory works
 
 ```text
-Chat model                 Context layer                 Abilities
-DeepSeek V4.1 Flash   ->   local memory + Jev     ->    MCP servers
-Codex subscription         recall + learning             Cua Driver
+Conversation message
+└── Evidence tied to that exact message revision
+    └── Memory record
+        ├── Revision history
+        ├── Recall history
+        └── Validity status
 ```
 
-You bring the model access. You connect the abilities. You explicitly choose whether memory, automatic learning, Jev routing, and smart tool loading are allowed.
+Editing or deleting a source message invalidates the evidence attached to that revision. Forgetting a memory deletes it and suppresses the same fact from being immediately learned again.
 
-Nothing here is silently enabled because it sounds convenient.
+Automatic learning is a separate opt-in feature. After an idle period, it reviews newly completed messages, proposes useful facts, and revalidates their sources before saving them. Learning can be disabled for individual conversations.
 
-## What works today
+## What is included
 
-### Bring your own model access
+| Area | Capabilities |
+| --- | --- |
+| **Chat** | Streamed Markdown, conversation history, edit, resend, unsend, thinking controls, context estimate |
+| **Models** | DeepSeek with an API key, supported Codex models through ChatGPT sign-in |
+| **Tools** | Local and remote MCP connections, per-tool controls, OAuth for compatible servers, built-in `webfetch` and Cua Driver |
+| **Memory** | Local SQLite storage, source evidence, revisions, recall history, deletion, opt-in automatic learning |
+| **Context** | Optional Jev tool selection and memory routing, with local fallbacks when Jev is disabled |
+| **Input** | Text, native push-to-talk dictation, and region screenshots for models that accept images |
+| **Desktop** | macOS app, customizable Moki avatar, conversation search, release update checks |
 
-Moki currently supports:
+Moki does not bundle third-party MCP servers. Computer-use tools do not yet have per-call permission prompts.
 
-- **DeepSeek V4.1 Flash** with your own DeepSeek API key.
-- **Codex subscription** through ChatGPT browser sign-in.
-- **TypeSafe Jev** with your own TypeSafe API key for experimental context routing.
+## Privacy and network access
 
-Credentials are encrypted with Electron `safeStorage` and are not returned to the renderer. Model availability is still decided by each provider.
+Moki stores conversations, settings, and memory locally. Credentials are encrypted with Electron `safeStorage`.
 
-### Give Moki abilities through MCP
+External services still receive the data required to do their jobs:
 
-Add local `stdio` or remote Streamable HTTP MCP servers from Settings. Moki can:
+- Your selected model provider receives chat requests.
+- Enabled MCP servers receive the arguments sent in tool calls.
+- TypeSafe receives bounded context only for the Jev features you enable.
+- Websites receive normal network request data when `webfetch` is used.
+- GitHub is contacted for release update checks.
 
-- discover each server's tools;
-- enable or disable whole connections;
-- disable individual tools;
-- sign in to compatible remote MCP servers through OAuth;
-- cache catalogs and fall back to the last known catalog when a server is temporarily unreachable;
-- merge connected tools into the agent's toolset.
+`webfetch` blocks local and private destinations, checks redirects, limits downloads to 5 MB, and truncates content before returning it to the model.
 
-Moki ships with no user-added MCP servers. You decide what it can reach.
+## Build from source
 
-[Cua Driver](https://cua.ai/) is also supported as a built-in MCP connection for computer-use tools on your Mac. Computer-use permission gating is not implemented yet, so every enabled Cua tool is available to the agent.
+Requires macOS, [Bun](https://bun.sh) 1.4.0, and Xcode command-line tools.
 
-### Fetch public web pages
-
-Moki includes a built-in `webfetch` tool. It can fetch public HTTP or HTTPS URLs and return Markdown, plain text, or HTML without a per-call approval prompt. It blocks local and private network destinations, checks every redirect, stops after five redirects, limits downloads to 5 MB, and truncates model-facing output.
-
-### Try large tool catalogs without dumping everything into context
-
-When smart tool loading is enabled, Jev scores likely tools for the current request. Moki loads a bounded set of their schemas directly and keeps the rest available through local `search_tools` and `call_tool` discovery tools.
-
-Without Jev, Moki falls back to a bounded names-only index and local tool search. Chat still works.
-
-This is one of the project's main questions: **can an assistant use hundreds of possible actions without paying the full context cost on every turn?**
-
-### Memory that you have to opt into
-
-Memory recall is **off by default**. Automatic learning is a separate switch and is also **off by default**.
-
-When enabled, the current implementation provides:
-
-- local SQLite storage;
-- basic local recall;
-- an explicit memory tool for the current request;
-- searchable, paginated saved memories;
-- edit, pin, inspect, and forget controls;
-- source-message evidence and revision tracking;
-- topic, entity, and relationship records;
-- learning history with revision-safe undo;
-- per-conversation learning exclusions.
-
-Automatic learning reviews only new completed messages after you enable it. It does not backfill old conversations. Only user statements may support learned facts; assistant text is treated as context.
-
-### Jev as the experimental context layer
-
-[TypeSafe Jev](https://typesafe.ai/) is important to what Moki is trying to test. Today it is used for three separate jobs:
-
-1. **Smart tool loading** chooses which tool schemas should enter the prompt directly.
-2. **Contextual memory routing** uses bounded evidence plus learned topic and entity descriptors to select relevant memories.
-3. **Learning verification** checks a proposed fact against the user message cited as evidence before it is saved.
-
-Each path has its own conditions and consent. Connecting Jev does not automatically enable memory, learning, or Jev memory routing.
-
-The limits are real:
-
-- Jev recall falls back to basic local recall when the descriptors it needs do not exist yet.
-- If TypeSafe is unreachable, learning can continue without the additional Jev verification step.
-- Live Jev retrieval quality is not yet verified.
-
-That is why Moki exposes recall history, learning runs, evidence, revisions, and fallback status instead of pretending the context pipeline is magic.
-
-## Privacy and control
-
-Moki's current rules are deliberately explicit:
-
-| Capability | Default | What leaves your Mac when enabled |
-| --- | --- | --- |
-| Basic memory recall | Off | Nothing. Retrieval is local. |
-| Automatic learning | Off | Bounded conversation excerpts go to your selected chat provider. |
-| Jev memory routing | Off | The request, bounded recent evidence, and bounded topic/entity descriptors go to TypeSafe. |
-| Jev learning verification | Requires a saved TypeSafe key | Bounded source excerpts and proposed facts go to TypeSafe. |
-| Smart tool loading | Off | Bounded message context plus tool names and short descriptions go to TypeSafe. Tool schemas and attachments are not sent. |
-| Public web fetch | Always available, no prompt | The requested URL, request headers, and normal network metadata go to the destination server. Local and private destinations are blocked. |
-
-MCP servers receive whatever an enabled tool call sends them. Review connections and tool switches before using them.
-
-## Other current features
-
-- streamed Markdown replies;
-- conversation history in SQLite;
-- per-conversation model selection and thinking level;
-- screenshot questions with model-gated image input;
-- native push-to-talk dictation on macOS;
-- edit, resend, or unsend your messages;
-- a context-usage estimate for the next turn;
-- built-in search across older conversations;
-- separate chat, history, settings, and learning-review windows.
-
-## Build it locally
-
-### Requirements
-
-- macOS
-- Bun **1.4.0**
-- Xcode command-line tools
-
-```sh
+```bash
 bun install
 bun run build
 bun run desktop
 ```
 
-`desktop` opens the Electron application. It does not start a development server. Closing the window hides Moki; use the tray, Dock, or Quit action to reopen or stop it.
-
-### Connect the pieces
-
-1. Open **Settings > Providers**.
-2. Add a DeepSeek API key or sign in with your ChatGPT account for Codex.
-3. Optionally add a TypeSafe API key for Jev.
-4. Open **Settings > Connections** and add the MCP servers you want Moki to use.
-5. Open **Settings > Memory** and explicitly enable recall, learning, or Jev routing if you want to test them.
-6. Choose the chat provider and model under **Settings > Moki**, then start a conversation.
-
 ## Development
 
-```sh
+```bash
 bun run typecheck
 bun run build
 bun run test:foundation
-bun run package:dir
-```
-
-The foundation checks are offline. They do not prove live provider access, a real MCP connection, native permission flows, Jev retrieval quality, or the packaged GUI. Those still require focused or manual verification.
-
-For renderer development:
-
-```sh
 bun run dev
 ```
 
-This starts Vite on `127.0.0.1:5173` and opens the separate **Moki Dev** app profile. Production builds remain server-free.
+`bun run dev` starts Vite on `127.0.0.1:5173` and uses a separate Moki Dev profile.
 
-Imports use path aliases only:
+Moki is built with Electron, React, TypeScript, Bun, Capek model adapters, the AI SDK, and TypeSafe's SDK. Foundation tests run offline. They do not prove live provider access, real MCP connections, or retrieval quality.
 
-```text
-@shared/*
-@renderer/*
-@electron/*
-@backend/*
-@scripts/*
-```
-
-## Architecture
-
-```text
-src/electron   Electron windows, tray, native permissions, encrypted credentials
-src/backend    Bundled Bun runtime, chat loop, MCP clients, memory, SQLite
-src/renderer   React interface with no direct network or filesystem access
-src/shared     Typed IPC contracts and runtime validation
-src/native     macOS dictation helper
-tests          Focused offline and source-level checks
-```
-
-Moki is built with Electron, React, TypeScript, Bun, Čapek model adapters, the AI SDK, and TypeSafe's SDK.
-
-## Current boundaries
-
-Before trying Moki, know what it is not yet:
-
-- not signed, notarized, or ready for public macOS distribution;
-- not production-hardened;
-- not verified on Intel Macs;
-- not equipped with per-call computer-use permission prompts;
-- not able to accept arbitrary file attachments;
-- not proof that the current memory or Jev approach is the right one.
-
-The point of the project is to make those experiments concrete enough to inspect, run, break, and improve.
+Imports use path aliases only: `@shared/*`, `@renderer/*`, `@electron/*`, `@backend/*`, and `@scripts/*`.
 
 ## Contributing
 
-Issues and focused pull requests are welcome. Please describe the behavior you observed, the behavior you expected, and how you verified the change.
-
-This is a young, solo-maintained project. Small changes with clear boundaries are much easier to review than broad rewrites.
+Issues and focused pull requests are welcome. Include the behavior you observed, what you expected, and how you verified the change.
 
 ## License
 
-All source code in this repository is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
-
-The repository does not include a local copy of the license text yet. The linked canonical terms apply.
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). A local copy of the license text still needs to be added to this repository.

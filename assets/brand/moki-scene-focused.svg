@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080" role="img" aria-labelledby="title description">
+  <title id="title">Moki focused at a desk</title>
+  <desc id="description">A sky-blue Moki in work clothes and round glasses concentrates on a laptop in a quiet evening workspace.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#18202d"/>
+      <stop offset="1" stop-color="#2f2942"/>
+    </linearGradient>
+    <radialGradient id="lamp-glow" cx="50%" cy="50%" r="50%">
+      <stop stop-color="#f8dc9a" stop-opacity=".36"/>
+      <stop offset="1" stop-color="#f8dc9a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="moki-body" cx="35%" cy="23%" r="83%">
+      <stop stop-color="#eaf6ff"/>
+      <stop offset=".62" stop-color="#a6c9e7"/>
+      <stop offset="1" stop-color="#759cce"/>
+    </radialGradient>
+    <clipPath id="moki-silhouette">
+      <path d="M49 130 C43 79 70 47 120 47 C170 47 197 79 191 130 C187 172 161 190 120 190 C79 190 53 172 49 130Z"/>
+    </clipPath>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <rect width="1080" height="1080" rx="72" fill="url(#background)"/>
+  <circle cx="790" cy="285" r="250" fill="url(#lamp-glow)"/>
+  <path d="M0 790 C210 740 402 805 594 770 C774 737 918 693 1080 732 V1080 H0Z" fill="#222a38"/>
+  <path d="M0 823 C219 775 407 840 600 804 C780 771 927 730 1080 765" fill="none" stroke="#3b4658" stroke-width="5"/>
+
+  <g aria-hidden="true" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M772 412 V208 Q772 165 814 165 H877" stroke="#77849b" stroke-width="18"/>
+    <path d="M837 159 H955 L925 238 H806Z" fill="#f0c878" stroke="#77849b" stroke-width="9"/>
+    <circle cx="867" cy="238" r="9" fill="#f8dc9a" stroke="none"/>
+    <rect x="94" y="175" width="270" height="198" rx="24" fill="#202a39" stroke="#53647a" stroke-width="8"/>
+    <path d="M118 329 L184 263 L238 306 L289 238 L342 291" stroke="#759cce" stroke-width="11"/>
+    <circle cx="184" cy="263" r="10" fill="#a6c9e7" stroke="none"/>
+    <circle cx="289" cy="238" r="10" fill="#a6c9e7" stroke="none"/>
+  </g>
+
+  <ellipse cx="540" cy="818" rx="264" ry="40" fill="#101620" opacity=".46" filter="url(#soft-shadow)"/>
+  <g transform="translate(216 102) scale(2.7)">
+    <ellipse cx="120" cy="207" rx="58" ry="9" fill="#516fa5" opacity=".13"/>
+    <g>
+      <ellipse cx="89" cy="187" rx="18" ry="10" fill="#759cce"/>
+      <ellipse cx="151" cy="187" rx="18" ry="10" fill="#759cce"/>
+      <path d="M49 130 C43 79 70 47 120 47 C170 47 197 79 191 130 C187 172 161 190 120 190 C79 190 53 172 49 130Z" fill="url(#moki-body)" stroke="#759cce" stroke-width="1.5"/>
+      <g clip-path="url(#moki-silhouette)" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M30 158 L90 153 Q120 167 150 153 L210 158 L210 205 L30 205Z" fill="#384454"/>
+        <path d="M100 156 Q120 163 140 156 L120 194Z" fill="#fff6e9"/>
+        <path d="M116 164 L124 164 L127 180 L120 189 L113 180Z" fill="#516fa5"/>
+        <path d="M91 153 L109 160 L120 194 L91 177 L98 170 L85 163Z M149 153 L131 160 L120 194 L149 177 L142 170 L155 163Z" fill="#556578"/>
+        <rect x="151" y="174" width="22" height="12" rx="2" fill="#f4f1e9"/>
+      </g>
+      <ellipse cx="69" cy="87" rx="12" ry="6" fill="#fff" opacity=".3" transform="rotate(-40 69 87)"/>
+      <ellipse cx="48" cy="147" rx="10" ry="19" fill="#a6c9e7" transform="rotate(25 48 147)"/>
+      <ellipse cx="192" cy="144" rx="10" ry="19" fill="#a6c9e7" transform="rotate(-30 192 144)"/>
+      <ellipse cx="81" cy="138" rx="12" ry="6" fill="#e994a5" opacity=".38"/>
+      <ellipse cx="159" cy="138" rx="12" ry="6" fill="#e994a5" opacity=".38"/>
+      <g fill="#443544">
+        <ellipse cx="94" cy="120" rx="5" ry="8"/>
+        <ellipse cx="146" cy="120" rx="5" ry="8"/>
+        <circle cx="96" cy="117" r="1.7" fill="#fff"/>
+        <circle cx="148" cy="117" r="1.7" fill="#fff"/>
+      </g>
+      <path d="M115 143 L123 143" fill="none" stroke="#443544" stroke-width="3" stroke-linecap="round"/>
+      <g fill="none" stroke="#516fa5" stroke-width="3">
+        <circle cx="94" cy="120" r="17"/>
+        <circle cx="146" cy="120" r="17"/>
+        <path d="M111 118 Q120 113 129 118 M77 116 L65 112 M163 116 L175 112"/>
+      </g>
+    </g>
+  </g>
+
+  <g stroke-linejoin="round">
+    <path d="M281 670 H785 L751 850 H315Z" fill="#344155" stroke="#53647a" stroke-width="9"/>
+    <path d="M454 690 H682 L662 806 H474Z" fill="#151d29" stroke="#759cce" stroke-width="7"/>
+    <circle cx="568" cy="749" r="18" fill="#a6c9e7" opacity=".75"/>
+    <path d="M420 850 H807" stroke="#758298" stroke-width="22" stroke-linecap="round"/>
+    <path d="M462 861 L420 1040 M759 861 L807 1040" stroke="#58667a" stroke-width="20" stroke-linecap="round"/>
+  </g>
+  <g fill="#a6c9e7">
+    <circle cx="853" cy="522" r="7"/>
+    <circle cx="886" cy="491" r="11" opacity=".75"/>
+    <circle cx="923" cy="451" r="16" opacity=".45"/>
+  </g>
+</svg>
