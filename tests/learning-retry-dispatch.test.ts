@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { Store } from '@backend/store';
-import { LearningCoordinator, LEARNING_COOLDOWN_MS } from '@backend/memory-learning';
+import { Store } from '@backend/storage/store';
+import { LearningCoordinator, LEARNING_COOLDOWN_MS } from '@backend/learning/learning';
 
 function fixture() {
   const store = new Store(':memory:');

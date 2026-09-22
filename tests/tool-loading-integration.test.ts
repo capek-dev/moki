@@ -3,10 +3,10 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ToolLoadingSettings } from '../src/electron/tool-loading';
-import { Chat } from '../src/backend/chat';
-import { Store } from '../src/backend/store';
-import { smartToolbag } from '../src/backend/tool-scoring';
-import type { Toolbag } from '../src/backend/cua';
+import { Chat } from '@backend/core/chat';
+import { Store } from '@backend/storage/store';
+import { smartToolbag } from '@backend/tools/scoring';
+import type { Toolbag } from '@backend/integrations/cua';
 
 // Native safeStorage and HTTP are boundary fakes. Settings persistence, Chat,
 // SDK request serialization, allocation, execution and diagnostic output are real.

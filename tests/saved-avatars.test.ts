@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '@backend/store';
+import { Store } from '@backend/storage/store';
 import { INITIAL_APPEARANCE, validateAppearance } from '@shared/appearance';
 import { applyResult } from '@renderer/lib/chat-state';
 

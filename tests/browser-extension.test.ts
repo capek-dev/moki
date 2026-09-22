@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { BrowserExtension } from '@backend/browser-extension';
-import { selectedToolbag } from '@backend/tool-selection';
-import type { Toolbag } from '@backend/cua';
+import { BrowserExtension } from '@backend/integrations/browser-extension';
+import { selectedToolbag } from '@backend/tools/selection';
+import type { Toolbag } from '@backend/integrations/cua';
 import { BrowserExtensionHost, isBrowserExtensionOrigin } from '@electron/browser-extension-host';
 import {
   ACTIVE_TAB_CAPABILITY,

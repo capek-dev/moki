@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite';
-import { installMemoryCategorySchema, backfillMemoryCategories } from '@backend/memory-categories';
-import { assertSourceEvidenceAllowed } from '@backend/memory-repository';
-import type { MemoryRecord, MemoryState } from '@backend/memory-repository';
+import { installMemoryCategorySchema, backfillMemoryCategories } from '@backend/memory/categories';
+import { assertSourceEvidenceAllowed } from '@backend/memory/repository';
+import type { MemoryRecord, MemoryState } from '@backend/memory/repository';
 
 export type TopicRecord = {
   id: string;

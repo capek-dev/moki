@@ -1,4 +1,4 @@
-import type { Generate } from '@backend/chat';
+import type { Generate } from '@backend/core/chat';
 
 /** Observe only visible output, never reasoning, tools or credentials. */
 export function observeLearningReview(generate: Generate, publish: (text: string) => void, now = Date.now): Generate {

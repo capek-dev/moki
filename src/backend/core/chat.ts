@@ -1,24 +1,24 @@
 import type { ModelMessage } from 'ai';
 import { requireToolLoading, type ToolLoadingConfig } from '@shared/tool-loading';
-import type { SelectionEvidence } from './tool-scoring';
-import { Store, text } from '@backend/store';
+import type { SelectionEvidence } from '@backend/tools/scoring';
+import { Store, text } from '@backend/storage/store';
 import { requireThinking, type Thinking } from '@shared/models';
 import type { Attachment, Provider, Result, Message, ToolCallRecord } from '@shared/protocol';
 import { requireAttachmentId } from '@shared/attachments';
-import type { AgentToolDef, ModelToolOutput, Toolbag } from '@backend/cua';
-import { SESSION_SEARCH_GUIDANCE } from '@backend/session-search-tool';
-import { MEMORY_TOOL_GUIDANCE } from '@backend/memory-tool';
-import { assembleTurnInstructions, DEFAULT_MEMORY_HOST_CONFIG, recallBasic, type BasicRecallResult, type MemoryHostConfig } from '@backend/memory-recall';
-import { recallJev, type JevRecallResult } from '@backend/memory-jev';
+import type { AgentToolDef, ModelToolOutput, Toolbag } from '@backend/integrations/cua';
+import { SESSION_SEARCH_GUIDANCE } from '@backend/session-search/tool';
+import { MEMORY_TOOL_GUIDANCE } from '@backend/tools/memory';
+import { assembleTurnInstructions, DEFAULT_MEMORY_HOST_CONFIG, recallBasic, type BasicRecallResult, type MemoryHostConfig } from '@backend/memory/recall';
+import { recallJev, type JevRecallResult } from '@backend/memory/jev';
 import type { MemoryRecallInspection } from '@shared/memory';
 import { cuaToolLabel, describeCuaCall } from '@shared/cua';
 import { describeMcpCall, mcpToolLabel, ToolBudgetError } from '@shared/mcp';
 import type { ContextTurn, ContextUpdate, ContextUsage } from '@shared/context';
 import { countModelImages, createImageAccounting, estimateContextUsage } from '@shared/context';
 import { formatClockContext, systemClock, type Clock } from '@shared/clock';
-import { describeError } from '@backend/error-description';
+import { describeError } from '@backend/core/error-description';
 
-export { describeError } from '@backend/error-description';
+export { describeError } from '@backend/core/error-description';
 
 // Private pipe contract, never exposed through the renderer's request union.
 export type Credentials = { provider: 'deepseek'; key: string } | { provider: 'codex'; access: string; accountId: string };

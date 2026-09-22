@@ -3,8 +3,8 @@ import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compactSchema, diagnosticConfig, parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix, schemaWeight, toolMatchesPattern, TOOL_SCHEMA_BUDGET, TOOL_NAME_MAX, type McpServerConfig, type ParsedMcpConfig, type ToolWeightLabel } from '@shared/mcp';
 import type { McpServerState, McpState } from '@shared/protocol';
-import { parseToolCallResult, type AgentToolDef, type Toolbag } from '@backend/cua';
-import type { Store } from '@backend/store';
+import { parseToolCallResult, type AgentToolDef, type Toolbag } from '@backend/integrations/cua';
+import type { Store } from '@backend/storage/store';
 
 // User-added MCP servers. Slice 1: config file ownership plus stdio catalogs
 // (spawn -> initialize -> tools/list -> close, one short-lived connection per

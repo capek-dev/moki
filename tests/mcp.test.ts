@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expandLocalHome, FAKE_SERVER_SOURCE, Mcp, mergeToolbags, parseLocalCommand } from '@backend/mcp';
-import type { Toolbag } from '@backend/cua';
-import { Store } from '@backend/store';
+import { expandLocalHome, FAKE_SERVER_SOURCE, Mcp, mergeToolbags, parseLocalCommand } from '@backend/integrations/mcp';
+import type { Toolbag } from '@backend/integrations/cua';
+import { Store } from '@backend/storage/store';
 import { describeMcpCall, mcpToolLabel } from '@shared/mcp';
 import { parseMcpConfig, requireExposedToolName, sanitizeToolName, serverPrefix, toolMatchesPattern, compactSchema, TOOL_SCHEMA_BUDGET } from '@shared/mcp';
 
@@ -14,7 +14,7 @@ function freshDir() {
 }
 
 // A real spawn end to end: the config points at this process running the
-// inline JSON-RPC server from @backend/mcp.
+// inline JSON-RPC server from @backend/integrations/mcp.
 function fakeServerConfig(extra: Record<string, unknown> = {}) {
   return { transport: 'stdio', command: process.execPath, args: ['-e', FAKE_SERVER_SOURCE], ...extra };
 }

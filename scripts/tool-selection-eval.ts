@@ -1,5 +1,5 @@
-import type { AgentToolDef } from '../src/backend/cua';
-import { smartToolbag, type ScoringOptions } from '../src/backend/tool-scoring';
+import type { AgentToolDef } from '@backend/integrations/cua';
+import { smartToolbag, type ScoringOptions } from '@backend/tools/scoring';
 
 export interface EvalCase {
   id: string;

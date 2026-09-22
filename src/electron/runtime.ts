@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { ChatRequest, Request, Result } from '@shared/protocol';
-import type { Credentials } from '@backend/chat';
+import type { Credentials } from '@backend/core/chat';
 import { isBrowserExtensionCall, type BrowserExtensionCall } from '@shared/browser-extension';
 
 export interface BrowserExtensionRuntime {

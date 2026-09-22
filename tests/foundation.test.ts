@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { Store } from '@backend/store';
+import { Store } from '@backend/storage/store';
 import { Runtime, runtimeRequestTimeoutMs } from '@electron/runtime';
 
 const binaryPath = resolve(process.env.MOKI_TEST_BINARY ?? 'dist/backend/moki-runtime');

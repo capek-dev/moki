@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { requireCuaToolName } from '@shared/cua';
 import { compactSchema, schemaWeight, type ToolWeightLabel } from '@shared/mcp';
 import type { CuaState, CuaTool } from '@shared/protocol';
-import type { Store } from '@backend/store';
+import type { Store } from '@backend/storage/store';
 
 // Cua Driver speaks MCP over stdio. Catalog fetches use a short-lived
 // connection (initialize -> tools/list -> close); tool execution during a chat

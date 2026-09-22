@@ -1,5 +1,5 @@
-import type { Toolbag, AgentToolDef } from '@backend/cua';
-import type { MemoryHostConfig } from '@backend/memory-recall';
+import type { Toolbag, AgentToolDef } from '@backend/integrations/cua';
+import type { MemoryHostConfig } from '@backend/memory/recall';
 import type {
   MemoryRepository,
   ForegroundMemoryWriteResult,
@@ -8,7 +8,7 @@ import type {
   MemoryRecord,
   MemoryForgetResult,
   MemoryRead,
-} from '@backend/memory-repository';
+} from '@backend/memory/repository';
 
 export const MEMORY_TOOL_NAME = 'memory';
 export const MEMORY_TOOL_GUIDANCE = 'Memory changes happen only when the user explicitly asks in the foreground. Do not learn from ordinary conversation or treat automatic tool calls as proof of a request. Use forget only for an explicit current-user request. Forgetting removes the live memory-store record, evidence, topic links, and relationships; it does not erase conversation history or backups.';

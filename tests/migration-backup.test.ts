@@ -3,8 +3,8 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ensurePreMigrationBackup, preMigrationBackupPath, type MigrationBackupIo } from '@backend/migration-backup';
-import { Store } from '@backend/store';
+import { ensurePreMigrationBackup, preMigrationBackupPath, type MigrationBackupIo } from '@backend/storage/migration-backup';
+import { Store } from '@backend/storage/store';
 
 function temporaryDatabase() {
   const dir = mkdtempSync(join(tmpdir(), 'moki-migration-backup-'));

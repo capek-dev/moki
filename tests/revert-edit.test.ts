@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '@backend/store';
-import { Chat, type Turn } from '@backend/chat';
+import { Store } from '@backend/storage/store';
+import { Chat, type Turn } from '@backend/core/chat';
 
 const credentials = { provider: 'deepseek' as const, key: 'test-secret' };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

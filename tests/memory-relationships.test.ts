@@ -3,8 +3,8 @@ import type { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { applicableAt, isApplicableAt, relationshipApplicableAt } from '@backend/memory-graph-repository';
-import { Store } from '@backend/store';
+import { applicableAt, isApplicableAt, relationshipApplicableAt } from '@backend/memory/graph-repository';
+import { Store } from '@backend/storage/store';
 
 const memoryId = '11111111-1111-4111-8111-111111111111';
 const secondMemoryId = '22222222-2222-4222-8222-222222222222';

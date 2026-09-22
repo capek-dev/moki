@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { Store } from '@backend/store';
-import { LearningCoordinator, type LearningProposal } from '@backend/memory-learning';
-import { normalizeMemoryTopics } from '@backend/memory-categories';
-import { recallJev } from '@backend/memory-jev';
+import { Store } from '@backend/storage/store';
+import { LearningCoordinator, type LearningProposal } from '@backend/learning/learning';
+import { normalizeMemoryTopics } from '@backend/memory/categories';
+import { recallJev } from '@backend/memory/jev';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

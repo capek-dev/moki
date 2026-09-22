@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { smartToolbag, fitsScoringRequest, type ScoringOptions } from '../src/backend/tool-scoring';
-import type { Toolbag } from '../src/backend/cua';
-import { Chat } from '../src/backend/chat';
-import { Store } from '../src/backend/store';
+import { smartToolbag, fitsScoringRequest, type ScoringOptions } from '@backend/tools/scoring';
+import type { Toolbag } from '@backend/integrations/cua';
+import { Chat } from '@backend/core/chat';
+import { Store } from '@backend/storage/store';
 
 const config = { enabled: true, maxDirect: 12, key: 'private-test-key' };
 function source(count = 1): Toolbag {

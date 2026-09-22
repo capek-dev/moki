@@ -17,7 +17,7 @@ import * as url from 'node:url';
 import * as readline from 'node:readline';
 import * as nodeCrypto from 'node:crypto';
 import * as os from 'node:os';
-import { Store } from '@backend/store';
+import { Store } from '@backend/storage/store';
 
 test('preload strips Electron events and removes subscriptions', () => {
   const ipc = Object.assign(new EventEmitter(), { invoke: async (channel: string) => channel });

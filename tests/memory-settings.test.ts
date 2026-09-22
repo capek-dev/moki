@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Store } from '@backend/store';
-import { MEMORY_TOOL_NAME, memoryToolbag } from '@backend/memory-tool';
-import { recallBasic } from '@backend/memory-recall';
+import { Store } from '@backend/storage/store';
+import { MEMORY_TOOL_NAME, memoryToolbag } from '@backend/tools/memory';
+import { recallBasic } from '@backend/memory/recall';
 import { acceptMemoryRevision, memoryRecallLabel, MEMORY_DISABLED_COPY, MEMORY_FORGET_SCOPE_COPY } from '@renderer/lib/memory-settings-state';
 
 test('recall inspection explains fallback without implying a settings change', () => {

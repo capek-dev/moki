@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { namesOnlyToolbag } from '../src/backend/tool-fallback';
-import { smartToolbag } from '../src/backend/tool-scoring';
-import type { Toolbag } from '../src/backend/cua';
+import { namesOnlyToolbag } from '@backend/tools/fallback';
+import { smartToolbag } from '@backend/tools/scoring';
+import type { Toolbag } from '@backend/integrations/cua';
 
 function source(names: string[]): Toolbag {
   return { tools: names.map(name => ({ name, description: 'private-description-marker', inputSchema: { type: 'object', schemaMarker: true } })), close() {}, execute: async name => ({ text: name, isError: false }) };

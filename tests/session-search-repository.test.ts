@@ -3,8 +3,8 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { preMigrationBackupPath } from '@backend/migration-backup';
-import { Store } from '@backend/store';
+import { preMigrationBackupPath } from '@backend/storage/migration-backup';
+import { Store } from '@backend/storage/store';
 
 function withStore(run: (store: Store) => void) {
   const store = new Store(':memory:');

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { descriptorBatches, selectedToolbag, type ToolScore } from '../src/backend/tool-selection';
-import type { AgentToolDef, Toolbag } from '../src/backend/cua';
+import { descriptorBatches, selectedToolbag, type ToolScore } from '@backend/tools/selection';
+import type { AgentToolDef, Toolbag } from '@backend/integrations/cua';
 
 const tool = (name: string, description = name): AgentToolDef => ({ name, description, inputSchema: { type: 'object' } });
 const score = (name: string): ToolScore => ({ name, score: 1.7, probabilities: [0, 0.3, 0.7, 0] });

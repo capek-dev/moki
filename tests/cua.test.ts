@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Cua, MODEL_RESULT_LIMIT, TRUNCATION_MARKER, parseToolCallResult, type CuaTransport } from '@backend/cua';
-import { Store } from '@backend/store';
+import { Cua, MODEL_RESULT_LIMIT, TRUNCATION_MARKER, parseToolCallResult, type CuaTransport } from '@backend/integrations/cua';
+import { Store } from '@backend/storage/store';
 import { cuaToolLabel, describeCuaCall, requireCuaToolName } from '@shared/cua';
 
 function freshStore() {

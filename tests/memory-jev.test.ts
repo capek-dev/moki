@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
-import { Store } from '@backend/store';
-import { recallJev } from '@backend/memory-jev';
+import { Store } from '@backend/storage/store';
+import { recallJev } from '@backend/memory/jev';
 
 function conversation(store: Store): string {
   return store.handle({ method: 'createConversation', assistantId: 'moki' }).conversationId!;

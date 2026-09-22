@@ -1,9 +1,9 @@
 import { score, TypeSafeClient } from '@typesafe-ai/sdk';
 import { getEncoding } from 'js-tiktoken';
-import type { AgentToolDef, Toolbag } from './cua';
-import { toolDescriptors, selectedToolbag, type ToolScore, type ToolDescriptor } from './tool-selection';
+import type { AgentToolDef, Toolbag } from '@backend/integrations/cua';
+import { toolDescriptors, selectedToolbag, type ToolScore, type ToolDescriptor } from '@backend/tools/selection';
 import type { ToolLoadingConfig } from '@shared/tool-loading';
-import { namesOnlyToolbag } from './tool-fallback';
+import { namesOnlyToolbag } from '@backend/tools/fallback';
 
 const LEVELS = ['Not useful for the task.', 'Related but no concrete use.', 'Directly useful action or likely prerequisite.', 'Required for an explicit part of the task.'];
 export interface SelectionEvidence { request: string; recent: string }

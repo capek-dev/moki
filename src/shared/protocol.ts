@@ -1,11 +1,11 @@
 import type { Thinking } from '@shared/models';
 import type { ContextTurn, ContextUsage } from '@shared/context';
 import type { MemoryConnectionsPage, MemoryDetail, MemoryMutationAttribution, MemoryPage, MemoryRecallHistoryPage, MemoryRecallInspection, MemorySettingsState } from '@shared/memory';
-import type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningSettingsState, LearningRunSummary } from '@backend/memory-learning';
+import type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningSettingsState, LearningRunSummary } from '@backend/learning/learning';
 import type { BrowserExtensionState } from '@shared/browser-extension';
 import type { UpdaterCommand, UpdaterState } from '@shared/updater';
 export type { MemoryConnectionsPage, MemoryDetail, MemoryMutationAttribution, MemoryPage, MemoryRecallHistoryPage, MemoryRecallInspection, MemorySettingsState } from '@shared/memory';
-export type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningRunSummary, LearningSettingsState } from '@backend/memory-learning';
+export type { LearningHistoryRecord, LearningRunDetail, LearningRunPage, LearningRunSummary, LearningSettingsState } from '@backend/learning/learning';
 export type Provider = 'deepseek' | 'codex';
 export interface Assistant { id: string; name: string; provider: Provider; instructions: string; appearance?: import('@shared/appearance').Appearance }
 export interface Conversation { id: string; assistantId: string; title: string; model: string | null; thinking: Thinking | null }

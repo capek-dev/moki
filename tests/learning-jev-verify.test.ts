@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Store } from '@backend/store';
-import { LearningCoordinator, type LearningProposal, type LearningSource } from '@backend/memory-learning';
-import { verifyLearningSupport, type VerifyFetcher } from '@backend/learning-verify';
+import { Store } from '@backend/storage/store';
+import { LearningCoordinator, type LearningProposal, type LearningSource } from '@backend/learning/learning';
+import { verifyLearningSupport, type VerifyFetcher } from '@backend/learning/verify';
 
 function typesafeResponse(nouls: Record<string, unknown>) {
   return new Response(JSON.stringify({ model: 'jev-latest', answers: nouls, usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } });

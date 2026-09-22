@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { observeLearningReview } from '@backend/learning-review-stream';
+import { observeLearningReview } from '@backend/learning/review-stream';
 import { LearningReviewCache } from '@electron/learning-review-cache';
-import type { Turn } from '@backend/chat';
-import { Store } from '@backend/store';
+import type { Turn } from '@backend/core/chat';
+import { Store } from '@backend/storage/store';
 
 test('memory forgetting invalidates ephemeral review output', () => {
   const store = new Store(':memory:');

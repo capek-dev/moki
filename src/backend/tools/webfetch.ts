@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { Readable } from 'node:stream';
 import TurndownService from 'turndown';
-import type { Toolbag } from '@backend/cua';
+import type { Toolbag } from '@backend/integrations/cua';
 
 export const WEBFETCH_TOOL_NAME = 'webfetch';
 export const WEBFETCH_TOOL_DESCRIPTION = `Fetch a public HTTP or HTTPS URL and return readable content.

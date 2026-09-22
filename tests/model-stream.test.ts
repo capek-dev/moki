@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { createGenerate, codexFetch } from '@backend/model-stream';
-import { describeError, normalizeError } from '@backend/error-description';
-import type { Turn } from '@backend/chat';
+import { createGenerate, codexFetch } from '@backend/providers/model-stream';
+import { describeError, normalizeError } from '@backend/core/error-description';
+import type { Turn } from '@backend/core/chat';
 import { createImageAccounting, type ContextUpdate } from '@shared/context';
 
 const turn: Turn = { conversationId: 'conversation', model: 'gpt-5.6-sol', provider: 'codex', instructions: 'Be kind.', messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello' }, { role: 'user', content: '<moki_turn_context>\nCurrent date/time: 2025-01-02T03:04:05; timezone: UTC; UTC: 2025-01-02T03:04:05.000Z.\n</moki_turn_context>\n\n<moki_user_message>\nAgain\n</moki_user_message>' }], credentials: { provider: 'codex', access: 'secret-access', accountId: 'account' } };

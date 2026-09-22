@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { recallBasic } from '@backend/memory-recall';
-import { Chat, type Generate, type Turn } from '@backend/chat';
+import { recallBasic } from '@backend/memory/recall';
+import { Chat, type Generate, type Turn } from '@backend/core/chat';
 import {
   MAX_MEMORY_TOOL_OUTPUT_BYTES,
   MEMORY_TOOL_INPUT_SCHEMA,
@@ -8,8 +8,8 @@ import {
   MEMORY_TOOL_GUIDANCE,
   MEMORY_TOOL_NAME,
   memoryToolbag,
-} from '@backend/memory-tool';
-import { Store } from '@backend/store';
+} from '@backend/tools/memory';
+import { Store } from '@backend/storage/store';
 
 const memoryId = '11111111-1111-4111-8111-111111111111';
 

@@ -1,9 +1,9 @@
 import { score, TypeSafeClient } from '@typesafe-ai/sdk';
 import type { EntryType } from '@typesafe-ai/sdk';
-import type { MemoryGraphRepository, MemoryRoutingDescriptor, MemoryRoutingDescriptorPage } from '@backend/memory-graph-repository';
-import type { JevSeedMemory, MemoryRepository } from '@backend/memory-repository';
-import { recallBasic, selectWholeRecallEntries, type BasicRecallConfig, type BasicRecallEntry } from '@backend/memory-recall';
-import { validScore, type ToolScore } from '@backend/tool-selection';
+import type { MemoryGraphRepository, MemoryRoutingDescriptor, MemoryRoutingDescriptorPage } from '@backend/memory/graph-repository';
+import type { JevSeedMemory, MemoryRepository } from '@backend/memory/repository';
+import { recallBasic, selectWholeRecallEntries, type BasicRecallConfig, type BasicRecallEntry } from '@backend/memory/recall';
+import { validScore, type ToolScore } from '@backend/tools/selection';
 import type { MemoryRecallInspection, MemoryRecallSelection } from '@shared/memory';
 
 const ROUTING_LEVELS = ['Not relevant to this task.', 'Possibly related but not useful.', 'Relevant to the task.', 'Required to resolve an explicit part of the task.'];

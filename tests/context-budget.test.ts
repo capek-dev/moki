@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createGenerate } from '@backend/model-stream';
-import type { Turn } from '@backend/chat';
+import { createGenerate } from '@backend/providers/model-stream';
+import type { Turn } from '@backend/core/chat';
 import { createImageAccounting, estimateModelContext, ContextBudgetError } from '@shared/context';
 
 const sse = (events: unknown[]) => events.map((data) => `data: ${JSON.stringify(data)}\n\n`).join('');

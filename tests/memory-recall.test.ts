@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { recallBasic, memoryConfigFromHost } from '@backend/memory-recall';
-import { Store } from '@backend/store';
-import type { CreateMemoryInput } from '@backend/memory-repository';
+import { recallBasic, memoryConfigFromHost } from '@backend/memory/recall';
+import { Store } from '@backend/storage/store';
+import type { CreateMemoryInput } from '@backend/memory/repository';
 
 const ids = [
   '11111111-1111-4111-8111-111111111111',

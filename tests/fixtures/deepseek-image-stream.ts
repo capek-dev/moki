@@ -13,7 +13,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const chunk = (delta: unknown, finish_reason: string | null = null) => ({ id: 'chat_1', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] });
   return new Response([chunk({ role: 'assistant', content: 'Seen' }), chunk({}, 'stop')].map((value) => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
 }) as typeof fetch;
-const { generate } = await import('@backend/model-stream');
+const { generate } = await import('@backend/providers/model-stream');
 let output = '';
 for await (const delta of generate({ conversationId: 'c', model: 'deepseek-flash', provider: 'deepseek', instructions: 'Be kind.', credentials: { provider: 'deepseek', key: 'offline-test' }, messages: [{ role: 'user', content: [{ type: 'text', text: 'Read this' }, { type: 'image', image: new Uint8Array([1, 2, 3]), mediaType: 'image/png' }] }] }, new AbortController().signal)) output += delta;
 assert.equal(output, 'Seen');

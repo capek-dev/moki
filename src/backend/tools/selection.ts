@@ -1,4 +1,4 @@
-import type { AgentToolDef, Toolbag } from './cua';
+import type { AgentToolDef, Toolbag } from '@backend/integrations/cua';
 
 export interface ToolScore { name: string; score: number; probabilities: readonly number[] }
 export interface ToolDescriptor { name: string; description: string }

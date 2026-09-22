@@ -1,6 +1,6 @@
 // Real-daemon check for the tools/call path chat turns use: one CuaSession,
 // one read-only call, clean close. Run: bun scripts/cua-call-check.ts
-import { CuaSession } from '@backend/cua';
+import { CuaSession } from '@backend/integrations/cua';
 
 const session = new CuaSession();
 try {

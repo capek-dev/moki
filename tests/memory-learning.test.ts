@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { Store } from '@backend/store';
-import { LearningCoordinator, LEARNING_DISPATCH_TIMEOUT_MS, LEARNING_IDLE_MS, LEARNING_MAX_AUTOMATIC_ATTEMPTS, LEARNING_MAX_PENDING_MS, LEARNING_REVIEW_TIMEOUT_MS, LEARNING_RUN_DETAIL_MAX_BYTES, reviewWithModel, type LearningProposal } from '@backend/memory-learning';
+import { Store } from '@backend/storage/store';
+import { LearningCoordinator, LEARNING_DISPATCH_TIMEOUT_MS, LEARNING_IDLE_MS, LEARNING_MAX_AUTOMATIC_ATTEMPTS, LEARNING_MAX_PENDING_MS, LEARNING_REVIEW_TIMEOUT_MS, LEARNING_RUN_DETAIL_MAX_BYTES, reviewWithModel, type LearningProposal } from '@backend/learning/learning';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

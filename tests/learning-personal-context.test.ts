@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { Store } from '@backend/store';
-import { LearningCoordinator, LEARNING_REVIEW_INSTRUCTIONS, reviewWithModel, type LearningProposal } from '@backend/memory-learning';
+import { Store } from '@backend/storage/store';
+import { LearningCoordinator, LEARNING_REVIEW_INSTRUCTIONS, reviewWithModel, type LearningProposal } from '@backend/learning/learning';
 
 // Contract/application regression, not a claim that a live model extracts these facts.
 test('personal introduction reaches reviewer and multiple identity facts from one source persist', async () => {

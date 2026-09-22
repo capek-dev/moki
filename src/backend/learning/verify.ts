@@ -1,5 +1,5 @@
 import { noul, TypeSafeClient } from '@typesafe-ai/sdk';
-import type { LearningProposal, LearningSource } from './memory-learning';
+import type { LearningProposal, LearningSource } from '@backend/learning/learning';
 
 /**
  * Jev source-support gate for learning reviews. The TypeSafe API answers

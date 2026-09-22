@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '@backend/store';
+import { Store } from '@backend/storage/store';
 
 // The messages schema exactly as older Moki versions created it, before the
 // plan 28 provenance columns existed.

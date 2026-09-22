@@ -1,4 +1,4 @@
-import type { AgentToolDef, Toolbag, ToolExecutionResult } from '@backend/cua';
+import type { AgentToolDef, Toolbag, ToolExecutionResult } from '@backend/integrations/cua';
 import { schemaWeight } from '@shared/mcp';
 import {
   BROWSER_DISCOVER_ELEMENTS,

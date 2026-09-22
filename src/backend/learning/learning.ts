@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { categorizeMemory, normalizeMemoryTopics } from '@backend/memory-categories';
+import { categorizeMemory, normalizeMemoryTopics } from '@backend/memory/categories';
 import type { Database } from 'bun:sqlite';
-import type { Credentials, Generate } from '@backend/chat';
-import type { EvidenceModality, MemoryKind, MemoryRepository } from '@backend/memory-repository';
-import { MemoryGraphRepository, type EntityKind, type RelationshipKind } from '@backend/memory-graph-repository';
-import { assertSourceEvidenceAllowed } from '@backend/memory-repository';
-import { describeError } from '@backend/error-description';
+import type { Credentials, Generate } from '@backend/core/chat';
+import type { EvidenceModality, MemoryKind, MemoryRepository } from '@backend/memory/repository';
+import { MemoryGraphRepository, type EntityKind, type RelationshipKind } from '@backend/memory/graph-repository';
+import { assertSourceEvidenceAllowed } from '@backend/memory/repository';
+import { describeError } from '@backend/core/error-description';
 import { defaultModel, requireModel } from '@shared/models';
 
 export const LEARNING_IDLE_MS = 2 * 60_000;

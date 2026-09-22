@@ -5,7 +5,7 @@ import {
   WEBFETCH_INPUT_SCHEMA,
   WEBFETCH_TOOL_NAME,
   type WebfetchDependencies,
-} from '@backend/webfetch-tool';
+} from '@backend/tools/webfetch';
 
 const publicAddress = async (_hostname: string) => ['93.184.216.34'];
 

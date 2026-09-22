@@ -3,10 +3,10 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '@backend/store';
-import { Chat, history, type Generate, type Turn } from '@backend/chat';
+import { Store } from '@backend/storage/store';
+import { Chat, history, type Generate, type Turn } from '@backend/core/chat';
 import { ToolBudgetError } from '@shared/mcp';
-import type { Toolbag } from '@backend/cua';
+import type { Toolbag } from '@backend/integrations/cua';
 import { applyResult } from '@renderer/lib/chat-state';
 import type { Attachment, Message, Result } from '@shared/protocol';
 

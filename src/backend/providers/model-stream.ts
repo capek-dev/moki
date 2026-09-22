@@ -2,8 +2,8 @@ import { jsonSchema, stepCountIs, streamText, tool } from 'ai';
 import { createOpenAiResponsesModel } from '@capekai/core/providers';
 import { getModelWithMetadata } from '@capekai/core/execution';
 import { createSingleModelConfiguration, withRuntimeConfiguration } from '@capekai/core/configuration';
-import type { Generate, TurnToolOutput } from '@backend/chat';
-import { describeError, normalizeError } from '@backend/error-description';
+import type { Generate, TurnToolOutput } from '@backend/core/chat';
+import { describeError, normalizeError } from '@backend/core/error-description';
 import { requireModel, requireThinking } from '@shared/models';
 import { estimateModelContext, ContextBudgetError, type ContextUpdate } from '@shared/context';
 

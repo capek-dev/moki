@@ -196,7 +196,7 @@ export class ProviderConnections {
   }
   private refresh?: { generation: number; promise: Promise<void> };
   // Main-process-only access. Never return this value through renderer IPC.
-  async credentials(provider: 'deepseek' | 'codex'): Promise<import('@backend/chat').Credentials> {
+  async credentials(provider: 'deepseek' | 'codex'): Promise<import('@backend/core/chat').Credentials> {
     if (provider === 'deepseek') {
       const key = this.load().deepseek;
       if (!key) throw new Error('Connect DeepSeek in Settings first.');

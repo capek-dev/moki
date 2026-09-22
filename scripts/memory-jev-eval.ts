@@ -1,8 +1,8 @@
-import { Store } from '@backend/store';
-import { recallJev, type JevFetcher } from '@backend/memory-jev';
-import type { BasicRecallConfig } from '@backend/memory-recall';
-import type { MemoryRecord } from '@backend/memory-repository';
-import type { MemoryRoutingDescriptor } from '@backend/memory-graph-repository';
+import { Store } from '@backend/storage/store';
+import { recallJev, type JevFetcher } from '@backend/memory/jev';
+import type { BasicRecallConfig } from '@backend/memory/recall';
+import type { MemoryRecord } from '@backend/memory/repository';
+import type { MemoryRoutingDescriptor } from '@backend/memory/graph-repository';
 
 export type MemoryJevEvalCase = {
   id: string;

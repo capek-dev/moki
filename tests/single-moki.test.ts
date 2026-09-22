@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { Store } from '@backend/store';
+import { Store } from '@backend/storage/store';
 import { canChatWithMoki, mokiAssistant } from '@renderer/lib/moki';
 import { INITIAL_APPEARANCE } from '@shared/appearance';
 import type { Assistant, Conversation } from '@shared/protocol';

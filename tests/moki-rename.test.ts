@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { databasePath, userDataPath } from '@shared/data-paths';
-import { Store } from '@backend/store';
+import { Store } from '@backend/storage/store';
 import { INITIAL_APPEARANCE } from '@shared/appearance';
 
 function fixture(run: (dir: string) => void) {

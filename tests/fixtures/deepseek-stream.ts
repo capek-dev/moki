@@ -32,7 +32,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   return new Response([chunk({ role: 'assistant', content: 'Hello' }), chunk({}, 'stop')].map((value) => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
 }) as typeof fetch;
-const { createGenerate } = await import('@backend/model-stream');
+const { createGenerate } = await import('@backend/providers/model-stream');
 const generate = createGenerate(fetch);
 for (const level of [null, 'high', 'max'] as const) {
   thinking = level;

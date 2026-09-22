@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { smartToolbag, fitsScoringRequest } from '../src/backend/tool-scoring';
+import { smartToolbag, fitsScoringRequest } from '@backend/tools/scoring';
 
 test('direct-name questions carry their own identity and preserve mapping across bulk splits', async () => {
   for (const descriptorMode of ['name-only', 'name-description'] as const) {

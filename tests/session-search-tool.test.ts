@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import { Store } from '@backend/store';
-import { Chat, type Generate, type Turn } from '@backend/chat';
-import { smartToolbag } from '@backend/tool-scoring';
-import { sessionSearchToolbag, SESSION_SEARCH_INPUT_SCHEMA, SESSION_SEARCH_TOOL_NAME, SESSION_SEARCH_GUIDANCE } from '@backend/session-search-tool';
-import { MAX_SESSION_SEARCH_OUTPUT_BYTES } from '@backend/session-search-repository';
-import type { Toolbag } from '@backend/cua';
+import { Store } from '@backend/storage/store';
+import { Chat, type Generate, type Turn } from '@backend/core/chat';
+import { smartToolbag } from '@backend/tools/scoring';
+import { sessionSearchToolbag, SESSION_SEARCH_INPUT_SCHEMA, SESSION_SEARCH_TOOL_NAME, SESSION_SEARCH_GUIDANCE } from '@backend/session-search/tool';
+import { MAX_SESSION_SEARCH_OUTPUT_BYTES } from '@backend/session-search/repository';
+import type { Toolbag } from '@backend/integrations/cua';
 
 const credentials = { provider: 'deepseek' as const, key: 'test-secret' };
 

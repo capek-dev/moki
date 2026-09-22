@@ -1,5 +1,5 @@
-import type { Toolbag } from './cua';
-import { selectedToolbag } from './tool-selection';
+import type { Toolbag } from '@backend/integrations/cua';
+import { selectedToolbag } from '@backend/tools/selection';
 
 /** Keep fallback provider declarations byte-stable. The complete live catalog
  * remains available through search_tools and call_tool.
