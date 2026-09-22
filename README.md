@@ -2,7 +2,7 @@
   <img src="assets/brand/moki-scene-focused.svg" alt="Moki working on a laptop" width="260">
 </p>
 
-<h1 align="center">A desktop AI assistant with memory you can inspect.</h1>
+<h1 align="center">A desktop AI assistant trying a different way to remember.</h1>
 
 <p align="center">
   Moki is an open-source macOS app for talking to AI models, connecting MCP tools, and keeping optional memory on your machine.
@@ -25,15 +25,16 @@
 
 ## Why Moki
 
-Most AI assistants hide how context and memory are assembled. Moki makes those parts visible and optional.
+A fixed `USER.md` or `MEMORY.md` is simple, but its contents take prompt space on every turn. Moki explores a different approach: use Jev to score compact topic and entity descriptors, then retrieve and validate a small set of relevant records from a larger structured memory collection.
 
-- **Bring your own model access:** Use a DeepSeek API key or sign in with ChatGPT for supported Codex models.
-- **Connect tools through MCP:** Add local `stdio` or remote HTTP servers, then enable only the connections and tools you want.
-- **Inspect memory:** See what Moki learned, which message supports it, why it was recalled, and remove it when it is wrong.
-- **Choose what runs:** Basic recall, automatic learning, Jev routing, and smart tool loading are separate settings. Memory features are off by default.
-- **Keep local control:** Conversations and memory live in local SQLite. There is no required Moki account or telemetry.
+- **Route through topics and entities:** Jev judges which bounded descriptors matter to the current request. Raw memory text stays local during routing.
+- **Retrieve locally:** Moki uses SQLite eligibility, lexical matching, and bounded graph expansion before adding at most 8 complete records to the prompt.
+- **Keep evidence:** Each learned fact can point to the exact message revision supporting it. Edit or delete the source and stale evidence stops counting.
+- **Choose what runs:** Basic recall, Jev routing, automatic learning, and smart tool loading are separate settings. Memory features are off by default.
+- **Bring your own model access and tools:** Use a DeepSeek API key or supported Codex models through ChatGPT sign-in, then connect only the MCP tools you want.
+- **Keep local control:** Conversations and authoritative memory live in local SQLite. There is no required Moki account or telemetry.
 
-Moki is maintained by one developer. It is early software, built for real use and continued experimentation rather than presented as production-hardened.
+Moki is maintained by one developer. It is early software, built for real use and continued experimentation rather than presented as production-hardened. Jev routing is implemented and bounded, but live precision, recall, and latency have not been established yet.
 
 ## What Moki is not
 
